@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  trading-system:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # Web UI for rules management
+      - "9090:9090"  # Metrics endpoint
+    environment:
+      - DATABASE_URL=sqlite:./trading.db  # Use relative path in current working directory
+      - POLYGON_API_KEY=${POLYGON_API_KEY}
+      - LIGHTSPEED_API_KEY=${LIGHTSPEED_API_KEY}
+      - LIGHTSPEED_API_SECRET=${LIGHTSPEED_API_SECRET}
+      - MAX_MEMORY_MB=1024
+      - RUST_LOG=debug
+      - BIND_ADDRESS=0.0.0.0:8080
+      - METRICS_ADDRESS=0.0.0.0:9090
+    volumes:
+      - ./data:/app/data              # Persistent database
+      - ./logs:/app/logs              # Log files
+      - ./config:/app/config          # Configuration files
+    restart: unless-stopped
+    networks:
+      - trading-network
+
+  # Optional: SQLite browser for development debugging
+  sqlite-browser:
+    image: linuxserver/sqlitebrowser
+    container_name: sqlite-browser
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - ./data:/data
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - trading-network
+    profiles:
+      - debug
+
+  # Optional: Prometheus for metrics monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+    networks:
+      - trading-network
+    profiles:
+      - monitoring
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  trading-data:
+    driver: local

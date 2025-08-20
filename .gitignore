@@ -1,0 +1,42 @@
+# Rust
+/target/
+Cargo.lock
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+/logs/
+*.log
+
+# Data directory
+/data/
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+
+# Build artifacts
+/dist/
+/build/
+
+# Temporary files
+*.tmp
+*.bak

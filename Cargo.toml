@@ -1,0 +1,74 @@
+[package]
+name = "trading-system"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "High-performance algorithmic trading system"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Database - using older compatible version
+sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono"] }
+
+# HTTP client for REST APIs - pinned to older version
+reqwest = { version = "0.11.24", features = ["json", "rustls-tls"], default-features = false }
+
+# WebSocket support - older version
+tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3.30"
+
+# Web framework for rules UI - older compatible version
+axum = { version = "0.7.4", features = ["macros"] }
+tower = "0.4.13"
+tower-http = { version = "0.5.1", features = ["cors", "fs"] }
+
+# Serialization
+serde = { version = "1.0.196", features = ["derive"] }
+serde_json = "1.0.113"
+
+# Configuration
+config = "0.14.0"
+dotenvy = "0.15.7"
+
+# Logging
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0.79"
+thiserror = "1.0.56"
+
+# Time handling - pinned to avoid edition2024 issues
+chrono = { version = "0.4.33", features = ["serde"] }
+
+# Memory management and collections
+crossbeam = "0.8.4"
+dashmap = "5.5.3"
+
+# Technical indicators
+ta = "0.5.0"
+
+# UUID generation
+uuid = { version = "1.7.0", features = ["v4", "serde"] }
+
+# Force older base64ct to avoid edition2024
+base64ct = "=1.6.0"
+
+# Development dependencies
+[dev-dependencies]
+tokio-test = "0.4.3"
+tempfile = "3.8.1"
+
+[profile.release]
+# Optimize for performance
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Faster compilation in development
+opt-level = 0
+debug = true
