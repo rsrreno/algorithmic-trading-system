@@ -1,3 +1,4 @@
+// src/config/mod.rs
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -15,8 +16,9 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightspeedConfig {
     pub api_key: String,
-    pub api_secret: String,
-    pub base_url: String,
+    pub connection_url: String,
+    pub client_id: String,
+    pub account_id: String,
     pub sandbox: bool,
 }
 
@@ -36,11 +38,14 @@ impl Config {
                 api_key: env::var("LIGHTSPEED_API_KEY")
                     .context("LIGHTSPEED_API_KEY environment variable is required")?,
                 
-                api_secret: env::var("LIGHTSPEED_API_SECRET")
-                    .context("LIGHTSPEED_API_SECRET environment variable is required")?,
+                connection_url: env::var("LIGHTSPEED_CONNECTION_URL")
+                    .unwrap_or_else(|_| "wss://onboarding.connecttrade.com:28052".to_string()),
                 
-                base_url: env::var("LIGHTSPEED_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.lightspeed.com".to_string()),
+                client_id: env::var("LIGHTSPEED_CLIENT_ID")
+                    .unwrap_or_else(|_| "BOGUS".to_string()),
+                
+                account_id: env::var("LIGHTSPEED_ACCOUNT_ID")
+                    .unwrap_or_else(|_| "ACC1".to_string()),
                 
                 sandbox: env::var("LIGHTSPEED_SANDBOX")
                     .unwrap_or_else(|_| "true".to_string())

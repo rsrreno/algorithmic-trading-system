@@ -1,3 +1,4 @@
+// src/main.rs
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::signal;
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
     let _metrics_handle = metrics::init(&config.metrics_address)?;
     info!("Metrics server started on {}", config.metrics_address);
 
-    // Create trading engine - fix: remove db parameter
+    // Create trading engine
     let engine = Arc::new(TradingEngine::new(config.clone()).await?);
     info!("Trading engine initialized");
 
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
         })
     };
 
-    // Start web server for rules management - fix: clone address before move
+    // Start web server for rules management
     let bind_address_clone = config.bind_address.clone();
     let metrics_address_clone = config.metrics_address.clone();
     let web_handle = {

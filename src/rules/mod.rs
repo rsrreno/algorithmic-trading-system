@@ -1,5 +1,4 @@
-use anyhow::Result;
-
+// src/rules/mod.rs
 pub struct RulesEngine;
 
 impl RulesEngine {

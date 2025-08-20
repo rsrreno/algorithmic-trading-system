@@ -1,5 +1,4 @@
-use anyhow::Result;
-
+// src/data/mod.rs
 pub struct DataModule;
 
 impl DataModule {

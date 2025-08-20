@@ -1,3 +1,4 @@
+# Cargo.toml
 [package]
 name = "trading-system"
 version = "0.1.0"
@@ -12,11 +13,11 @@ tokio = { version = "1.35", features = ["full"] }
 # Database - using older compatible version
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono"] }
 
-# HTTP client for REST APIs - pinned to older version
+# HTTP client for REST APIs - pinned to older version with ring
 reqwest = { version = "0.11.24", features = ["json", "rustls-tls"], default-features = false }
 
-# WebSocket support - older version
-tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
+# WebSocket support - use older version to avoid crypto provider issues
+tokio-tungstenite = { version = "0.18", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.30"
 
 # Web framework for rules UI - older compatible version
@@ -55,6 +56,10 @@ uuid = { version = "1.7.0", features = ["v4", "serde"] }
 
 # Force older base64ct to avoid edition2024
 base64ct = "=1.6.0"
+
+[[example]]
+name = "broker_test"
+path = "examples/broker_test.rs"
 
 # Development dependencies
 [dev-dependencies]
