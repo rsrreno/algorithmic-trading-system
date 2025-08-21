@@ -9,6 +9,19 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::engine::TradingEngine;
+use crate::data::SymbolDataResponse;
+
+#[derive(Deserialize)]
+struct SymbolRequest {
+    symbol: String,
+}
+
+#[derive(Serialize)]
+struct SymbolResponse {
+    success: bool,
+    data: Option<SymbolDataResponse>,
+    error: Option<String>,
+}
 
 #[derive(Deserialize)]
 struct OrderRequest {
@@ -38,6 +51,7 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         .route("/", get(root))
         .route("/health", get(health))
         .route("/api/status", get(get_status))
+        .route("/api/symbol", post(lookup_symbol))
         .route("/api/order", post(place_order))
         .with_state(engine);
 
@@ -118,10 +132,12 @@ async fn root() -> &'static str {
 
     <div class="api-info">
         <h3>🔧 API Usage</h3>
+        <p><strong>Symbol Lookup:</strong> <code>POST /api/symbol</code></p>
         <p><strong>Place Order:</strong> <code>POST /api/order</code></p>
         <p><strong>Check Status:</strong> <code>GET /api/status</code></p>
-        <p><strong>Example curl:</strong></p>
-        <code>curl -X POST http://localhost:8080/api/order -H "Content-Type: application/json" -d '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":1,"price":150.0}'</code>
+        <p><strong>Example curl commands:</strong></p>
+        <p><code>curl -X POST http://localhost:8080/api/symbol -H "Content-Type: application/json" -d '{"symbol":"AMZN"}'</code></p>
+        <p><code>curl -X POST http://localhost:8080/api/order -H "Content-Type: application/json" -d '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":1,"price":150.0}'</code></p>
     </div>
 
     <script>
@@ -206,6 +222,32 @@ async fn get_status(State(engine): State<Arc<TradingEngine>>) -> Json<StatusResp
         session_active: connected,
         message,
     })
+}
+
+async fn lookup_symbol(
+    State(engine): State<Arc<TradingEngine>>,
+    Json(request): Json<SymbolRequest>,
+) -> Json<SymbolResponse> {
+    tracing::info!("📊 Received symbol lookup request: {}", request.symbol);
+
+    match engine.lookup_symbol(&request.symbol).await {
+        Ok(data) => {
+            tracing::info!("✅ Symbol lookup successful: {} - ${:.2}", request.symbol, data.close);
+            Json(SymbolResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Symbol lookup failed: {}", e);
+            Json(SymbolResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
 }
 
 async fn place_order(

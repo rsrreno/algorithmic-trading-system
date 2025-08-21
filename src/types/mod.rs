@@ -1,3 +1,4 @@
+// src/types/mod.rs
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
@@ -61,7 +62,7 @@ pub struct Aggregate {
     pub transactions: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MarketDataStream {
     pub symbol: String,
     pub trades: VecDeque<Trade>,

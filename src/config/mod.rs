@@ -42,10 +42,10 @@ impl Config {
                     .unwrap_or_else(|_| "wss://onboarding.connecttrade.com:28052".to_string()),
                 
                 client_id: env::var("LIGHTSPEED_CLIENT_ID")
-                    .unwrap_or_else(|_| "BOGUS".to_string()),
+                    .unwrap_or_else(|_| "LIGHTSPEED".to_string()),
                 
                 account_id: env::var("LIGHTSPEED_ACCOUNT_ID")
-                    .unwrap_or_else(|_| "ACC1".to_string()),
+                    .context("LIGHTSPEED_ACCOUNT_ID environment variable is required")?,
                 
                 sandbox: env::var("LIGHTSPEED_SANDBOX")
                     .unwrap_or_else(|_| "true".to_string())

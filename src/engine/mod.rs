@@ -8,9 +8,13 @@ use tracing::{info, debug, error, warn};
 use crate::config::Config;
 use crate::types::{Position, MarketDataStream};
 use crate::broker::{BrokerModule, BrokerEvent};
+use crate::data::DataModule;
 
 pub struct TradingEngine {
     config: Config,
+    
+    // Data module for market data
+    data_module: DataModule,
     
     // Memory management
     total_memory_used: AtomicU64,
@@ -33,6 +37,10 @@ impl TradingEngine {
         
         let max_memory_bytes = config.max_memory_bytes();
         
+        // Initialize data module
+        let data_module = DataModule::new(&config)?;
+        info!("✅ Data module initialized");
+        
         // Initialize broker module
         let mut broker = BrokerModule::new();
         
@@ -41,6 +49,7 @@ impl TradingEngine {
         
         let engine = TradingEngine {
             config,
+            data_module,
             total_memory_used: AtomicU64::new(0),
             max_memory_bytes,
             positions: Arc::new(RwLock::new(DashMap::new())),
@@ -58,12 +67,13 @@ impl TradingEngine {
     pub async fn run(&self) -> Result<()> {
         info!("Starting trading engine main loop");
         
-        // Start broker event handler only if we need it
-        let mut broker_events_task: Option<tokio::task::JoinHandle<()>> = None;
+        // Test data connections on startup
+        if let Err(e) = self.data_module.test_connection().await {
+            error!("Failed to test data connection: {}", e);
+        }
         
-        // For now, skip the broker event handler since it's causing issues
-        // We'll add it back once we have real events to handle
-        // let mut broker_events_task = Some(self.start_broker_event_handler().await?);
+        // Start broker event handler
+        let mut broker_events_task: Option<tokio::task::JoinHandle<()>> = None;
         
         loop {
             tokio::select! {
@@ -102,98 +112,21 @@ impl TradingEngine {
         Ok(())
     }
     
-    async fn start_broker_event_handler(&self) -> Result<tokio::task::JoinHandle<()>> {
-        let broker: Arc<RwLock<BrokerModule>> = Arc::clone(&self.broker);
-        let positions = Arc::clone(&self.positions);
-        
-        // Get broker event stream
-        let mut events = {
-            let broker_guard = broker.read().await;
-            broker_guard.get_broker_events().await?
-        };
-        
-        let task = tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                if let Err(e) = Self::handle_broker_event(event, &positions).await {
-                    error!("Error handling broker event: {}", e);
-                }
-            }
-            warn!("Broker event stream ended");
-        });
-        
-        Ok(task)
-    }
-    
-    async fn handle_broker_event(
-        event: BrokerEvent,
-        positions: &Arc<RwLock<DashMap<String, Position>>>,
-    ) -> Result<()> {
-        match event {
-            BrokerEvent::Connected => {
-                info!("Broker connected successfully");
-            }
-            BrokerEvent::Disconnected => {
-                warn!("Broker disconnected");
-            }
-            BrokerEvent::OrderAck { client_order_id, order_id } => {
-                info!("Order acknowledged: {} -> {}", client_order_id, order_id);
-            }
-            BrokerEvent::OrderFill { client_order_id, symbol, side, qty, price } => {
-                info!("Order filled: {} {} {} @ {}", client_order_id, qty, symbol, price);
-                
-                // Update position tracking
-                Self::update_position_from_fill(positions, &symbol, &side, qty, price).await;
-            }
-            BrokerEvent::OrderReject { client_order_id, reason } => {
-                error!("Order rejected: {} - {}", client_order_id, reason);
-            }
-            BrokerEvent::Error { message } => {
-                error!("Broker error: {}", message);
-            }
-        }
-        
-        Ok(())
-    }
-    
-    async fn update_position_from_fill(
-        positions: &Arc<RwLock<DashMap<String, Position>>>,
-        symbol: &str,
-        side: &str,
-        qty: f64,
-        price: f64,
-    ) {
-        let positions_map = positions.read().await;
-        
-        // This is a simplified position update - you might want more sophisticated logic
-        if let Some(mut position) = positions_map.get_mut(symbol) {
-            match side {
-                "BUY" => {
-                    position.quantity += qty as u64;
-                    position.current_price = price;
-                }
-                "SELL" | "SELL_SHORT" => {
-                    if position.quantity >= qty as u64 {
-                        position.quantity -= qty as u64;
-                    } else {
-                        // Going short or reducing position below zero
-                        position.quantity = 0;
-                    }
-                    position.current_price = price;
-                }
-                _ => {}
-            }
-        }
-        // Drop the reference by ending the scope here
-        drop(positions_map);
-    }
-    
     async fn process_market_data(&self) -> Result<()> {
         // Placeholder for market data processing
         debug!("Processing market data");
         
-        // TODO: Integrate with data module to process real-time market data
-        // TODO: Update market_streams with new data
-        // TODO: Check memory usage and clean up old data if necessary
+        // Periodically fetch AMZN data as an example
+        static mut COUNTER: u32 = 0;
+        unsafe {
+            COUNTER += 1;
+            // Fetch AMZN data every 600 iterations (roughly every 60 seconds at 100ms intervals)
+            if COUNTER % 600 == 0 {
+                if let Err(e) = self.data_module.get_ticker_snapshot("AMZN").await {
+                    error!("Failed to fetch AMZN data: {}", e);
+                }
+            }
+        }
         
         Ok(())
     }
@@ -202,26 +135,11 @@ impl TradingEngine {
         // Placeholder for rule evaluation
         debug!("Evaluating trading rules");
         
-        // TODO: Integrate with rules engine
-        // TODO: Check if any trading conditions are met
-        // TODO: Place orders through broker if rules trigger
-        
-        // Example of how to place an order:
-        /*
-        if some_condition_met {
-            let broker = self.broker.read().await;
-            let order_id = broker.place_stock_order(
-                "AAPL",
-                "BUY",
-                "MARKET",
-                100,
-                None, // Market order, no price
-            ).await?;
-            info!("Placed order: {}", order_id);
-        }
-        */
-        
         Ok(())
+    }
+    
+    pub async fn lookup_symbol(&self, symbol: &str) -> Result<crate::data::SymbolDataResponse> {
+        self.data_module.get_symbol_data(symbol).await
     }
     
     pub async fn place_order(
@@ -266,7 +184,6 @@ impl TradingEngine {
         for entry in positions.iter() {
             let symbol = entry.key();
             info!("Position still open for {}", symbol);
-            // TODO: Implement position closing logic
         }
         
         // Clear market data streams
