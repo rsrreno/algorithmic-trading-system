@@ -51,7 +51,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
       env:
-        DATABASE_URL: sqlite::memory:
+        DATABASE_URL: "sqlite::memory:"
         POLYGON_API_KEY: test_key
         LIGHTSPEED_API_KEY: test_key
         LIGHTSPEED_API_SECRET: test_secret
