@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v8.21.25.1  
-**Last Updated:** 2025-01-23 - Initial development standards documentation  
+**Project Version:** v8.23.25.1  
+**Last Updated:** 2025-01-23 - Added versioning and git branch management documentation  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -170,12 +170,37 @@ src/
 - Decision pipeline implementation
 - Integration with existing broker/data modules
 
-## Version Management Protocol
+## Version Management & Git Workflow
+
+### Versioning Scheme
+- **Format**: `M.DD.YY.I` (Month.Day.Year.Iteration)
+- **Examples**: 
+  - `8.21.25.1` = August 21, 2025, iteration 1
+  - `8.23.25.1` = August 23, 2025, iteration 1
+  - `8.23.25.2` = August 23, 2025, iteration 2
+
+### Git Branch Management
+1. **main branch**: Stable, production-ready code
+2. **Development branches**: Named with version scheme (e.g., `8.23.25.1`)
+3. **Branch lifecycle**:
+   - Create feature branch from main: `git checkout -b 8.23.25.1`
+   - Develop and commit work to feature branch
+   - When ready: merge to main and push
+   - **Keep branches**: Do NOT delete branches (preserve for reference)
+   - Create new version branch for next development cycle
+
+### Documentation Updates
 When updating any of the three core .md files:
-1. **Update version number** in header (follow git branch naming)
+1. **Update version number** in header (match current git branch)
 2. **Update "Last Updated" date** and brief description
 3. **Maintain consistency** across `CLAUDE.md`, `README.md`, `STATUS.md`
 4. **Commit all three files together** when making project-wide updates
 
+### Git Best Practices
+- **Commit messages**: Use descriptive messages with emoji prefixes
+- **Merge strategy**: Fast-forward merges preferred
+- **Branch preservation**: Keep all development branches for historical reference
+- **Documentation commits**: Include Claude Code attribution when appropriate
+
 ---
-**Git Branch:** `8.21.25.1` | **Development Phase:** Rules Engine Implementation
+**Git Branch:** `8.23.25.1` | **Development Phase:** Rules Engine Implementation
