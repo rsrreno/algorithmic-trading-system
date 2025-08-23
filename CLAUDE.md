@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
 **Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-23 - Enhanced claude commit workflow and updated configurations  
+**Last Updated:** 2025-08-23 - Added remote repository push to claude commit workflow  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -211,6 +211,11 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
    - Stage documentation updates AND other legitimate changes made during session
    - Descriptive commit message summarizing ALL session work
    - Include Claude Code attribution footer
+4. **Push changes to remote repository**:
+   - Verify local branch matches remote branch name before pushing
+   - Check `git branch --show-current` matches the intended remote branch
+   - Push the branch to update the remote repo with session changes
+   - Ensure all work is preserved and accessible
 
 ### Git Best Practices
 - **Commit messages**: Use descriptive messages with emoji prefixes
