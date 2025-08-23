@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
 **Project Version:** v8.23.25.1  
-**Last Updated:** 2025-01-23 - Added versioning and git branch management documentation  
+**Last Updated:** 2025-08-23 - Implemented Claude Code git status hooks  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -196,6 +196,17 @@ When updating any of the three core .md files:
 3. **Maintain consistency** across `CLAUDE.md`, `README.md`, `STATUS.md`
 4. **Commit all three files together** when making project-wide updates
 
+### Claude Session Management
+When the user says "claude commit" or "update docs and commit" at the end of a development session, Claude should:
+1. **Update all three core .md files** (CLAUDE.md, README.md, STATUS.md):
+   - Update version numbers to match current git branch
+   - Update "Last Updated" dates to current date
+   - Add session summary to STATUS.md
+2. **Create git commit** with:
+   - Descriptive commit message summarizing session work
+   - Include Claude Code attribution footer
+   - Stage and commit all documentation changes
+
 ### Git Best Practices
 - **Commit messages**: Use descriptive messages with emoji prefixes
 - **Merge strategy**: Fast-forward merges preferred
@@ -203,4 +214,4 @@ When updating any of the three core .md files:
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `8.23.25.1` | **Development Phase:** Rules Engine Implementation
+**Git Branch:** `8.23.25.1` | **Development Phase:** Rules Engine Implementation + Claude Code Integration

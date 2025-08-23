@@ -1,0 +1,5 @@
+{
+  "hooks": {
+    "user-prompt-submit-hook": "git status --porcelain && echo \"Branch: $(git branch --show-current)\""
+  }
+}
