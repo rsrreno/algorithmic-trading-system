@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
 **Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-23 - Added remote repository push to claude commit workflow  
+**Last Updated:** 2025-08-23 - Removed non-working Claude Code hooks and git sync scripts  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
