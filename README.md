@@ -1,20 +1,22 @@
 # Algorithmic Trading System
 
 **Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-23 - Removed non-working Claude Code hooks and git sync scripts  
+**Last Updated:** 2025-08-26 - **MAJOR CORRECTION**: Polygon Stock Starter provides full technical indicators - Rules engine unblocked  
 **Related Files:** `CLAUDE.md`, `STATUS.md`
 
 ## Overview
 High-frequency algorithmic trading system built in Rust for momentum and breakout trading strategies. Features <5ms decision latency and integrations with Polygon.io data feeds and LightSpeed brokerage.
 
-**Current Status**: Phase 3 Development - Rules Engine Implementation (see `STATUS.md` for detailed progress)
+**Current Status**: Phase 3 Development - Rules Engine Implementation (all required data APIs confirmed available)
 
 ## Quick Start
 
 ### Prerequisites
 - Docker v28+ with Compose v2+
-- Polygon.io API account (Free tier supported, Stock Advanced recommended)
+- Polygon.io API account (**Stock Starter plan** - provides comprehensive market data and technical indicators)
 - LightSpeed trading account (Sandbox for development)
+
+**📋 API Documentation:** See [`ENDPOINTS.md`](ENDPOINTS.md) for complete endpoint reference and testing status.
 
 ### Environment Setup
 
@@ -77,14 +79,14 @@ curl -X POST http://localhost:8080/api/symbol \
   "success": true,
   "data": {
     "symbol": "AAPL",
-    "date": "2025-01-22",
-    "open": 225.00,
-    "high": 230.50,
-    "low": 224.75,
-    "close": 229.87,
-    "volume": 45234567,
-    "change": 4.87,
-    "change_percent": 2.16
+    "date": "2025-08-26",
+    "open": 226.48,
+    "high": 229.30,
+    "low": 226.23,
+    "close": 227.16,
+    "volume": 30982024,
+    "change": -0.69,
+    "change_percent": -0.30
   }
 }
 ```
@@ -110,11 +112,15 @@ curl -X POST http://localhost:8080/api/order \
 }
 ```
 
-### Current API Limitations
-- **Order Types**: Only BUY orders tested (SELL/SELL_SHORT need testing)
-- **Data Feed**: Single REST endpoint verified (free tier only)
-- **Account**: Sandbox environment only
-- **Web Interface**: Basic HTML placeholder (CURL APIs functional)
+### Current API Capabilities & Limitations
+- **Technical Indicators**: ✅ **AVAILABLE** - RSI, MACD, EMA, SMA via Polygon Stock Starter
+- **Historical Data**: ✅ **AVAILABLE** - 5 years historical data with unlimited API calls
+- **Market Data**: ✅ **AVAILABLE** - Real-time snapshots, minute aggregates, market movers
+- **Fundamentals**: ✅ **AVAILABLE** - Financial statements, news with sentiment analysis
+- **Order Types**: ❌ Only BUY orders tested (SELL/SELL_SHORT need testing)  
+- **Account**: ❌ Sandbox environment only
+- **Web Interface**: ❌ Basic HTML placeholder (CURL APIs functional)
+- **Data Delay**: ⚠️ 15-minute delayed data on Stock Starter plan
 
 ## Web Interface
 
@@ -123,10 +129,11 @@ Access the web interface at: http://localhost:8080
 **Current Status**: Basic HTML response indicating server is running. No functional trading interface implemented yet.
 
 **Planned Features**:
-- Rules configuration dashboard
-- Position monitoring interface
-- Trading performance analytics
-- Real-time market data display
+- Technical indicator dashboard (RSI, MACD, SMA, EMA charts)
+- Rules configuration interface with indicator-based conditions
+- Position monitoring with real-time P&L
+- Market scanner with top movers and sentiment analysis
+- Trading performance analytics with decision audit trail
 
 ## Development Information
 
@@ -142,27 +149,38 @@ Access the web interface at: http://localhost:8080
 - **Risk Management**: Configurable stop-loss and position limits
 
 ### Data Sources
-- **Market Data**: Polygon.io (currently free tier, upgrade to Stock Advanced planned)
+- **Market Data**: Polygon.io Stock Starter (unlimited API calls, 5yr history, all technical indicators)
+- **Technical Indicators**: SMA, EMA, RSI, MACD via Polygon REST APIs
+- **Real-time Updates**: WebSocket streaming for price/volume updates (15-min delayed)
 - **Broker Integration**: LightSpeed Connect WebSocket API
 - **Database**: Local SQLite for trade history and decision logging
 
 ## Account Requirements & Upgrades
 
-### Current Limitations
-1. **Polygon.io Free Tier**:
-   - Limited to basic daily/minute aggregates
-   - No real-time WebSocket streaming
-   - No premium endpoints (top movers, news)
+### Current Capabilities & Limitations
+1. **Polygon.io Stock Starter** - ✅ **COMPREHENSIVE**:
+   - ✅ All technical indicators available (RSI, MACD, EMA, SMA)
+   - ✅ 5 years historical data with unlimited API calls
+   - ✅ Market snapshots, minute aggregates, top movers
+   - ✅ News with sentiment analysis, financial fundamentals
+   - ✅ WebSocket streaming available for real-time updates
+   - ⚠️ **15-minute data delay** (real-time requires higher tier)
 
 2. **LightSpeed Sandbox**:
    - Test environment only
-   - Paper trading simulation
+   - Paper trading simulation  
    - Production account needed for live trading
 
-### Recommended Upgrades
-1. **Polygon.io Stock Advanced**: Real-time data feeds and WebSocket streaming
-2. **LightSpeed Production Account**: Live trading capabilities
-3. **Development**: Complete broker API testing (SELL orders, cancellations)
+### Next Development Steps
+1. **IMMEDIATE - API Integration**: 
+   - Implement technical indicator endpoints (SMA, EMA, RSI, MACD)
+   - Add market data endpoints (snapshots, aggregates, movers)
+   - Build memory cache system for <5ms decision performance
+   - Implement WebSocket streaming for real-time price updates
+2. **CURRENT - Rules Engine**: Build decision logic using confirmed indicator APIs
+3. **TESTING - Broker Module**: Complete API testing (SELL orders, cancellations)
+4. **OPTIONAL - Real-time Upgrade**: Polygon Advanced for live (non-delayed) data
+5. **FUTURE - Production**: LightSpeed production account for live trading
 
 ## File Organization
 
@@ -171,6 +189,7 @@ trading-system/
 ├── README.md              # This file - user documentation
 ├── CLAUDE.md              # Development guidelines and workflow
 ├── STATUS.md              # Implementation progress tracking
+├── ENDPOINTS.md           # Complete API endpoint reference and status
 ├── src/                   # Rust source code
 ├── docs/                  # Project specifications (PDF)
 ├── data/                  # SQLite database storage
@@ -180,6 +199,7 @@ trading-system/
 
 ## Support & Documentation
 
+- **API Endpoints**: See `ENDPOINTS.md` - Complete endpoint reference and testing status
 - **Development Workflow**: See `CLAUDE.md`
 - **Implementation Status**: See `STATUS.md`  
 - **Project Architecture**: See `README_orig.md`
@@ -207,4 +227,4 @@ docker compose down && docker compose up --build
 - **Database Growth**: Monitor `./data/trading.db` file size
 
 ---
-**Next Steps**: Complete rules engine implementation and upgrade to production accounts for live trading capabilities.
+**Next Steps**: Implement confirmed Polygon technical indicator APIs and build rules engine with comprehensive market data capabilities.

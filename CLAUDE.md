@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
 **Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-23 - Removed non-working Claude Code hooks and git sync scripts  
+**Last Updated:** 2025-08-26 - **MAJOR CORRECTION**: Polygon Stock Starter provides comprehensive technical indicators - Rules engine unblocked  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -157,18 +157,47 @@ src/
 
 ## Current Development Context
 
-### Immediate Constraints
-- **Polygon.io**: FREE tier only (single endpoint tested)
-- **LightSpeed**: Sandbox account (BUY orders only tested)
+### Current Environment Status - **MAJOR CORRECTION**
+- **Polygon.io**: **STOCK STARTER** plan with comprehensive capabilities - **FULLY SUPPORTS RULES ENGINE**
+- **Technical Indicators**: **ALL AVAILABLE** via REST APIs (SMA, EMA, RSI, MACD)
+- **Historical Data**: **5 YEARS** available with unlimited API calls
+- **Market Data**: **COMPREHENSIVE** - snapshots, aggregates, movers, news, fundamentals
+- **LightSpeed**: Sandbox account (BUY orders tested, SELL orders need testing)
 - **Database**: Connected but not integrated with application
 - **Web UI**: Placeholder only (CURL APIs functional)
 
-### Next Implementation Priority
-**Rules Engine** (`src/rules/`) - Currently empty placeholder
-- Technical indicators (MACD, RSI, EMA, SMA)
-- Rules criteria evaluation
-- Decision pipeline implementation
-- Integration with existing broker/data modules
+### Next Implementation Priority - **UNBLOCKED**
+**Rules Engine Implementation** (`src/rules/`) - **NOW POSSIBLE WITH CONFIRMED DATA APIS**
+- Technical indicator integration using confirmed Polygon endpoints
+- Memory cache system for <5ms decision performance
+- Rule evaluation logic with indicator-based conditions
+- Decision pipeline with real-time WebSocket triggers
+- Integration with existing broker module for order execution
+
+## External API Integration
+
+### **COMPREHENSIVE ENDPOINT DOCUMENTATION**
+**Complete API reference available in [`ENDPOINTS.md`](ENDPOINTS.md)** - includes all Polygon.io and LightSpeed Connect endpoints with status, parameters, examples, and documentation links.
+
+### **Key API Capabilities Summary**
+#### Polygon.io Stock Starter
+- **Technical Indicators**: 4 confirmed working endpoints (SMA, EMA, RSI, MACD)
+- **Market Data**: Real-time snapshots, minute aggregates, market movers
+- **Historical Data**: 5 years available with unlimited API calls  
+- **Fundamentals**: Financial statements, news with sentiment analysis
+- **WebSocket**: Real-time streaming (15-minute delayed)
+
+#### LightSpeed Connect
+- **Protocol**: WebSocket-only with JSON messaging
+- **Environment**: Sandbox (certification) currently active
+- **Order Types**: BUY orders confirmed, SELL orders need testing
+- **Advanced Features**: Bracket orders, OCA, multi-leg options available
+
+### **Implementation Integration Points**
+- **Data Module**: Integrate Polygon REST APIs for indicators and market data
+- **Broker Module**: Expand LightSpeed order testing and position management
+- **WebSocket Streaming**: Real-time price updates for rule triggers
+- **Memory Cache**: <5ms decision performance using cached indicator data
 
 ## Version Management & Git Workflow
 
