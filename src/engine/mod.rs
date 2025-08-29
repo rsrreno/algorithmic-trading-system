@@ -44,8 +44,14 @@ impl TradingEngine {
         // Initialize broker module
         let mut broker = BrokerModule::new();
         
-        // Initialize LightSpeed connection
-        broker.initialize_lightspeed(config.lightspeed_config.clone()).await?;
+        // Try to initialize LightSpeed connection if enabled
+        if config.is_lightspeed_enabled() {
+            if let Some(lightspeed_config) = config.lightspeed_config.clone() {
+                broker.try_initialize_lightspeed(lightspeed_config).await?;
+            }
+        } else {
+            tracing::info!("🔧 LightSpeed broker disabled in configuration");
+        }
         
         let engine = TradingEngine {
             config,

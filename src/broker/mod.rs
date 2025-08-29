@@ -12,16 +12,37 @@ pub use lightspeed::{LightspeedBroker, BrokerEvent};
 
 pub struct BrokerModule {
     lightspeed: Option<Arc<LightspeedBroker>>,
+    lightspeed_enabled: bool,
 }
 
 impl BrokerModule {
     pub fn new() -> Self {
         Self {
             lightspeed: None,
+            lightspeed_enabled: false,
         }
     }
 
-    pub async fn initialize_lightspeed(
+    pub async fn try_initialize_lightspeed(
+        &mut self, 
+        config: LightspeedConfig,
+    ) -> Result<()> {
+        match self.initialize_lightspeed_internal(config).await {
+            Ok(_) => {
+                self.lightspeed_enabled = true;
+                tracing::info!("✅ LightSpeed broker initialized successfully");
+                Ok(())
+            }
+            Err(e) => {
+                self.lightspeed_enabled = false;
+                tracing::warn!("⚠️ LightSpeed broker initialization failed: {} - continuing without broker", e);
+                // Return Ok to not crash the system
+                Ok(())
+            }
+        }
+    }
+
+    async fn initialize_lightspeed_internal(
         &mut self, 
         config: LightspeedConfig,
     ) -> Result<()> {
@@ -47,7 +68,7 @@ impl BrokerModule {
             let order = broker.create_stock_order(symbol, side, order_type, quantity, price);
             broker.place_order(order).await
         } else {
-            anyhow::bail!("LightSpeed broker not initialized")
+            anyhow::bail!("LightSpeed broker not available - check configuration and connection")
         }
     }
 
@@ -55,7 +76,7 @@ impl BrokerModule {
         if let Some(broker) = &self.lightspeed {
             broker.cancel_order(client_order_id).await
         } else {
-            anyhow::bail!("LightSpeed broker not initialized")
+            anyhow::bail!("LightSpeed broker not available - check configuration and connection")
         }
     }
 
@@ -63,7 +84,8 @@ impl BrokerModule {
         if let Some(broker) = &self.lightspeed {
             Ok(broker.get_positions().await)
         } else {
-            anyhow::bail!("LightSpeed broker not initialized")
+            // Return empty positions when broker not available
+            Ok(HashMap::new())
         }
     }
 
@@ -88,8 +110,12 @@ impl BrokerModule {
         if let Some(broker) = &self.lightspeed {
             Ok(broker.get_events().await)
         } else {
-            anyhow::bail!("LightSpeed broker not initialized")
+            anyhow::bail!("LightSpeed broker not available - check configuration and connection")
         }
+    }
+    
+    pub fn is_lightspeed_enabled(&self) -> bool {
+        self.lightspeed_enabled && self.lightspeed.is_some()
     }
 }
 

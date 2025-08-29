@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-26 - **MAJOR CORRECTION**: Polygon Stock Starter provides comprehensive technical indicators - Rules engine unblocked  
+**Project Version:** v8.28.25.1  
+**Last Updated:** 2025-08-28 - **NORMAL MODE VERIFIED**: System working with both modules - Polygon APIs need implementation  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -157,22 +157,23 @@ src/
 
 ## Current Development Context
 
-### Current Environment Status - **MAJOR CORRECTION**
-- **Polygon.io**: **STOCK STARTER** plan with comprehensive capabilities - **FULLY SUPPORTS RULES ENGINE**
-- **Technical Indicators**: **ALL AVAILABLE** via REST APIs (SMA, EMA, RSI, MACD)
-- **Historical Data**: **5 YEARS** available with unlimited API calls
-- **Market Data**: **COMPREHENSIVE** - snapshots, aggregates, movers, news, fundamentals
-- **LightSpeed**: Sandbox account (BUY orders tested, SELL orders need testing)
+### Current Environment Status - **VERIFIED NORMAL MODE**
+- **Polygon.io**: **STOCK STARTER** plan with comprehensive capabilities - **ENDPOINTS DOCUMENTED BUT NOT IMPLEMENTED**
+- **Technical Indicators**: **DOCUMENTED** in ENDPOINTS.md (SMA, EMA, RSI, MACD) - **NOT IMPLEMENTED** in `src/data/mod.rs`
+- **Historical Data**: **5 YEARS** available with unlimited API calls - **NOT IMPLEMENTED** in application
+- **Market Data**: **DOCUMENTED** - snapshots, aggregates, movers, news, fundamentals - **NOT IMPLEMENTED** in application
+- **LightSpeed**: Sandbox account (BUY orders tested, SELL orders need testing) - **WORKING**
 - **Database**: Connected but not integrated with application
 - **Web UI**: Placeholder only (CURL APIs functional)
+- **System**: **NORMAL MODE CONFIRMED** - both modules enabled and basic functionality working
 
-### Next Implementation Priority - **UNBLOCKED**
-**Rules Engine Implementation** (`src/rules/`) - **NOW POSSIBLE WITH CONFIRMED DATA APIS**
-- Technical indicator integration using confirmed Polygon endpoints
-- Memory cache system for <5ms decision performance
-- Rule evaluation logic with indicator-based conditions
-- Decision pipeline with real-time WebSocket triggers
-- Integration with existing broker module for order execution
+### Next Implementation Priority - **POLYGON API INTEGRATION REQUIRED**
+**Data Module Implementation** (`src/data/mod.rs`) - **CRITICAL FOR UNBLOCKING RULES ENGINE**
+- Implement technical indicator endpoints (SMA, EMA, RSI, MACD) documented in ENDPOINTS.md
+- Implement market data endpoints (snapshots, aggregates, movers) documented in ENDPOINTS.md
+- Build memory cache system for <5ms decision performance
+- Add WebSocket streaming for real-time price updates
+- **Rules Engine BLOCKED** until Polygon APIs implemented in application
 
 ## External API Integration
 

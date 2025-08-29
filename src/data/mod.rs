@@ -11,8 +11,9 @@ pub mod polygon;
 
 pub struct DataModule {
     client: Client,
-    api_key: String,
+    api_key: Option<String>,
     base_url: String,
+    polygon_enabled: bool,
 }
 
 impl DataModule {
@@ -23,16 +24,30 @@ impl DataModule {
             .build()
             .context("Failed to create HTTP client")?;
 
+        let polygon_enabled = config.is_polygon_enabled();
+        
+        if polygon_enabled {
+            info!("✅ Polygon.io data module enabled");
+        } else {
+            info!("🔧 Polygon.io data module disabled - no API key provided");
+        }
+
         Ok(DataModule {
             client,
             api_key: config.polygon_api_key.clone(),
             base_url: "https://api.polygon.io".to_string(),
+            polygon_enabled,
         })
     }
 
     /// Get ticker snapshot - uses daily aggregates for basic plan compatibility
     /// This method will be updated to use actual snapshots when plan is upgraded
     pub async fn get_ticker_snapshot(&self, symbol: &str) -> Result<()> {
+        if !self.polygon_enabled {
+            debug!("Polygon.io disabled - skipping ticker snapshot for {}", symbol);
+            return Ok(());
+        }
+        
         // For basic plan: use daily aggregates for yesterday's data
         // TODO: Switch to actual snapshot endpoint when upgrading to paid plan
         self.get_yesterday_daily_data(symbol).await
@@ -40,6 +55,9 @@ impl DataModule {
 
     /// Get yesterday's daily data for a symbol via API call
     pub async fn get_symbol_data(&self, symbol: &str) -> Result<SymbolDataResponse> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
         // Get yesterday's date in YYYY-MM-DD format
         let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
         let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
@@ -55,7 +73,7 @@ impl DataModule {
         let response = self
             .client
             .get(&url)
-            .query(&[("apikey", self.api_key.as_str())])
+            .query(&[("apikey", self.api_key.as_ref().unwrap().as_str())])
             .send()
             .await
             .context("Failed to send request to Polygon API")?;
@@ -131,7 +149,7 @@ impl DataModule {
         let response = self
             .client
             .get(&url)
-            .query(&[("apikey", self.api_key.as_str())])
+            .query(&[("apikey", self.api_key.as_ref().unwrap().as_str())])
             .send()
             .await
             .context("Failed to send request to Polygon API")?;
@@ -230,7 +248,7 @@ impl DataModule {
         let response = self
             .client
             .get(&url)
-            .query(&[("apikey", self.api_key.as_str())])
+            .query(&[("apikey", self.api_key.as_ref().unwrap().as_str())])
             .send()
             .await
             .context("Failed to fetch daily aggregates")?;
