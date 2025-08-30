@@ -1,15 +1,16 @@
 // src/web/mod.rs
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     response::Json,
     routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::collections::HashMap;
 use crate::engine::TradingEngine;
-use crate::data::SymbolDataResponse;
+use crate::data::{SymbolDataResponse, MarketMoverData, DailyBar, MinuteBar};
 
 #[derive(Deserialize)]
 struct SymbolRequest {
@@ -46,6 +47,59 @@ struct StatusResponse {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct IndicatorQuery {
+    window: Option<u32>,
+    timespan: Option<String>,
+    timestamp: Option<String>,
+    short_window: Option<u32>,
+    long_window: Option<u32>,
+    signal_window: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct IndicatorResponse {
+    success: bool,
+    value: Option<f64>,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MarketMoversResponse {
+    success: bool,
+    data: Option<Vec<MarketMoverData>>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MarketStatusResponse {
+    success: bool,
+    status: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NewsResponse {
+    success: bool,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NewsQuery {
+    limit: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct CacheStatsResponse {
+    success: bool,
+    entries: Option<usize>,
+    message: Option<String>,
+    error: Option<String>,
+}
+
+
 pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> Result<()> {
     let app = Router::new()
         .route("/", get(root))
@@ -53,6 +107,21 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         .route("/api/status", get(get_status))
         .route("/api/symbol", post(lookup_symbol))
         .route("/api/order", post(place_order))
+        // Technical Indicators
+        .route("/api/indicators/sma/:symbol", get(get_sma))
+        .route("/api/indicators/ema/:symbol", get(get_ema))
+        .route("/api/indicators/rsi/:symbol", get(get_rsi))
+        .route("/api/indicators/macd/:symbol", get(get_macd))
+        // Market Data
+        .route("/api/market/movers/gainers", get(get_market_gainers))
+        .route("/api/market/movers/losers", get(get_market_losers))
+        .route("/api/market/status", get(get_market_status))
+        .route("/api/market/previous/:symbol", get(get_previous_day))
+        .route("/api/market/minute/:symbol", get(get_minute_aggregates))
+        // News & Cache
+        // .route("/api/news", get(get_news)) // TODO: implement news endpoint
+        .route("/api/cache/stats", get(get_cache_stats))
+        .route("/api/cache/clean", post(clean_cache))
         .with_state(engine);
 
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
@@ -282,6 +351,423 @@ async fn place_order(
             Json(OrderResponse {
                 success: false,
                 order_id: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Technical Indicator Handlers
+async fn get_sma(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<IndicatorQuery>,
+) -> Json<IndicatorResponse> {
+    let window = params.window.unwrap_or(50);
+    let timespan = params.timespan.as_deref().unwrap_or("day");
+    // Use a recent date that should have data (30 days ago)
+    let default_timestamp = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(30))
+        .unwrap_or_else(chrono::Utc::now)
+        .format("%Y-%m-%d")
+        .to_string();
+    let timestamp = params.timestamp.as_deref().unwrap_or(&default_timestamp);
+    
+    tracing::info!("📊 SMA request: {} window={} timespan={} timestamp={}", symbol, window, timespan, timestamp);
+
+    match engine.get_data_module().get_sma_cached(&symbol, window, timespan, timestamp).await {
+        Ok(response) => {
+            tracing::info!("📊 SMA response status: {} results: {:?}", response.status, response.results.is_some());
+            let value = response.results
+                .as_ref()
+                .and_then(|r| r.values.as_ref())
+                .and_then(|v| v.first())
+                .and_then(|iv| iv.value);
+            
+            // Return the full response for debugging
+            let data = serde_json::to_value(&response).ok();
+            
+            Json(IndicatorResponse {
+                success: true,
+                value,
+                data,
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ SMA calculation failed: {}", e);
+            Json(IndicatorResponse {
+                success: false,
+                value: None,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_ema(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<IndicatorQuery>,
+) -> Json<IndicatorResponse> {
+    let window = params.window.unwrap_or(50);
+    let timespan = params.timespan.as_deref().unwrap_or("day");
+    // Use a recent date that should have data (30 days ago)
+    let default_timestamp = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(30))
+        .unwrap_or_else(chrono::Utc::now)
+        .format("%Y-%m-%d")
+        .to_string();
+    let timestamp = params.timestamp.as_deref().unwrap_or(&default_timestamp);
+    
+    tracing::info!("📊 EMA request: {} window={} timespan={} timestamp={}", symbol, window, timespan, timestamp);
+
+    match engine.get_data_module().get_ema_cached(&symbol, window, timespan, timestamp).await {
+        Ok(response) => {
+            tracing::info!("📊 EMA response status: {} results: {:?}", response.status, response.results.is_some());
+            let value = response.results
+                .as_ref()
+                .and_then(|r| r.values.as_ref())
+                .and_then(|v| v.first())
+                .and_then(|iv| iv.value);
+            
+            // Return the full response for debugging
+            let data = serde_json::to_value(&response).ok();
+            
+            Json(IndicatorResponse {
+                success: true,
+                value,
+                data,
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ EMA calculation failed: {}", e);
+            Json(IndicatorResponse {
+                success: false,
+                value: None,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_rsi(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<IndicatorQuery>,
+) -> Json<IndicatorResponse> {
+    let window = params.window.unwrap_or(14);
+    let timespan = params.timespan.as_deref().unwrap_or("day");
+    // Use a recent date that should have data (30 days ago)
+    let default_timestamp = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(30))
+        .unwrap_or_else(chrono::Utc::now)
+        .format("%Y-%m-%d")
+        .to_string();
+    let timestamp = params.timestamp.as_deref().unwrap_or(&default_timestamp);
+    
+    tracing::info!("📊 RSI request: {} window={} timespan={} timestamp={}", symbol, window, timespan, timestamp);
+
+    match engine.get_data_module().get_rsi_cached(&symbol, window, timespan, timestamp).await {
+        Ok(response) => {
+            tracing::info!("📊 RSI response status: {} results: {:?}", response.status, response.results.is_some());
+            let value = response.results
+                .as_ref()
+                .and_then(|r| r.values.as_ref())
+                .and_then(|v| v.first())
+                .and_then(|iv| iv.value);
+            
+            // Return the full response for debugging
+            let data = serde_json::to_value(&response).ok();
+            
+            Json(IndicatorResponse {
+                success: true,
+                value,
+                data,
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ RSI calculation failed: {}", e);
+            Json(IndicatorResponse {
+                success: false,
+                value: None,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_macd(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<IndicatorQuery>,
+) -> Json<IndicatorResponse> {
+    let short_window = params.short_window.unwrap_or(12);
+    let long_window = params.long_window.unwrap_or(26);
+    let signal_window = params.signal_window.unwrap_or(9);
+    let timespan = params.timespan.as_deref().unwrap_or("day");
+    // Use a recent date that should have data (30 days ago)
+    let default_timestamp = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(30))
+        .unwrap_or_else(chrono::Utc::now)
+        .format("%Y-%m-%d")
+        .to_string();
+    let timestamp = params.timestamp.as_deref().unwrap_or(&default_timestamp);
+    
+    tracing::info!("📊 MACD request: {} short={} long={} signal={} timespan={} timestamp={}", 
+                  symbol, short_window, long_window, signal_window, timespan, timestamp);
+
+    // MACD returns different structure so we need special handling
+    match engine.get_data_module().get_macd(&symbol, short_window, long_window, signal_window, timespan, timestamp).await {
+        Ok(response) => {
+            tracing::info!("📊 MACD response status: {} results: {:?}", response.status, response.results.is_some());
+            let value = response.results
+                .as_ref()
+                .and_then(|r| r.values.as_ref())
+                .and_then(|v| v.first())
+                .and_then(|iv| iv.value);
+            
+            // Return the full response for debugging
+            let data = serde_json::to_value(&response).ok();
+            
+            Json(IndicatorResponse {
+                success: true,
+                value,
+                data,
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ MACD calculation failed: {}", e);
+            Json(IndicatorResponse {
+                success: false,
+                value: None,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Market Data Handlers
+async fn get_market_gainers(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<MarketMoversResponse> {
+    tracing::info!("📊 Market gainers request");
+
+    match engine.get_data_module().get_market_movers("gainers").await {
+        Ok(movers) => Json(MarketMoversResponse {
+            success: true,
+            data: Some(movers),
+            error: None,
+        }),
+        Err(e) => {
+            tracing::error!("❌ Market gainers failed: {}", e);
+            Json(MarketMoversResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_market_losers(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<MarketMoversResponse> {
+    tracing::info!("📊 Market losers request");
+
+    match engine.get_data_module().get_market_movers("losers").await {
+        Ok(movers) => Json(MarketMoversResponse {
+            success: true,
+            data: Some(movers),
+            error: None,
+        }),
+        Err(e) => {
+            tracing::error!("❌ Market losers failed: {}", e);
+            Json(MarketMoversResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_market_status(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<MarketStatusResponse> {
+    tracing::info!("📊 Market status request");
+
+    match engine.get_data_module().get_market_status().await {
+        Ok(response) => {
+            let status = if response.market == Some("open".to_string()) {
+                "OPEN".to_string()
+            } else {
+                "CLOSED".to_string()
+            };
+            Json(MarketStatusResponse {
+                success: true,
+                status: Some(status),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Market status failed: {}", e);
+            Json(MarketStatusResponse {
+                success: false,
+                status: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_previous_day(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+) -> Json<SymbolResponse> {
+    tracing::info!("📊 Previous day request: {}", symbol);
+
+    match engine.get_data_module().get_previous_day_cached(&symbol).await {
+        Ok(bar) => {
+            let symbol_data = SymbolDataResponse {
+                symbol: symbol.clone(),
+                date: "previous_day".to_string(),
+                open: bar.open.unwrap_or(0.0),
+                high: bar.high.unwrap_or(0.0),
+                low: bar.low.unwrap_or(0.0),
+                close: bar.close.unwrap_or(0.0),
+                volume: bar.volume.unwrap_or(0.0) as u64,
+                vwap: bar.vwap.unwrap_or(0.0),
+                transactions: 0,
+                change: 0.0,
+                change_percent: 0.0,
+            };
+            Json(SymbolResponse {
+                success: true,
+                data: Some(symbol_data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Previous day failed: {}", e);
+            Json(SymbolResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_minute_aggregates(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<SymbolResponse> {
+    let from = params.get("from").cloned().unwrap_or_else(|| "2024-01-02".to_string());
+    let to = params.get("to").cloned().unwrap_or_else(|| "2024-01-02".to_string());
+    
+    tracing::info!("📊 Minute aggregates request: {} from={} to={}", symbol, from, to);
+
+    match engine.get_data_module().get_minute_aggregates(&symbol, &from, &to).await {
+        Ok(bars) => {
+            // Return summary of minute aggregates
+            let symbol_data = if let Some(first_bar) = bars.first() {
+                SymbolDataResponse {
+                    symbol: symbol.clone(),
+                    date: format!("{} to {}", from, to),
+                    open: first_bar.open.unwrap_or(0.0),
+                    high: bars.iter().map(|b| b.high.unwrap_or(0.0)).fold(0.0, f64::max),
+                    low: bars.iter().map(|b| b.low.unwrap_or(f64::MAX)).fold(f64::MAX, f64::min),
+                    close: bars.last().map(|b| b.close.unwrap_or(0.0)).unwrap_or(0.0),
+                    volume: bars.iter().map(|b| b.volume.unwrap_or(0.0)).sum::<f64>() as u64,
+                    vwap: 0.0,
+                    transactions: bars.len() as u32,
+                    change: 0.0,
+                    change_percent: 0.0,
+                }
+            } else {
+                SymbolDataResponse {
+                    symbol: symbol.clone(),
+                    date: format!("{} to {}", from, to),
+                    open: 0.0,
+                    high: 0.0,
+                    low: 0.0,
+                    close: 0.0,
+                    volume: 0,
+                    vwap: 0.0,
+                    transactions: 0,
+                    change: 0.0,
+                    change_percent: 0.0,
+                }
+            };
+            Json(SymbolResponse {
+                success: true,
+                data: Some(symbol_data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Minute aggregates failed: {}", e);
+            Json(SymbolResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Cache Handlers
+async fn get_cache_stats(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<CacheStatsResponse> {
+    tracing::info!("📊 Cache stats request");
+
+    match engine.get_data_module().get_cache_stats().await {
+        Ok(stats) => Json(CacheStatsResponse {
+            success: true,
+            entries: Some(stats.indicator_entries + stats.market_data_entries),
+            message: Some(format!("Cache contains {} entries", stats.indicator_entries + stats.market_data_entries)),
+            error: None,
+        }),
+        Err(e) => {
+            tracing::error!("❌ Cache stats failed: {}", e);
+            Json(CacheStatsResponse {
+                success: false,
+                entries: None,
+                message: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn clean_cache(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<CacheStatsResponse> {
+    tracing::info!("📊 Cache cleanup request");
+
+    match engine.get_data_module().clean_cache().await {
+        Ok(_) => Json(CacheStatsResponse {
+            success: true,
+            entries: Some(0),
+            message: Some("Cache cleared successfully".to_string()),
+            error: None,
+        }),
+        Err(e) => {
+            tracing::error!("❌ Cache cleanup failed: {}", e);
+            Json(CacheStatsResponse {
+                success: false,
+                entries: None,
+                message: None,
                 error: Some(e.to_string()),
             })
         }

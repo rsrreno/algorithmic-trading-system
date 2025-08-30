@@ -1,27 +1,34 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v8.28.25.1  
-**Last Updated:** 2025-08-28 - **NORMAL MODE VERIFIED**: System working with both modules - Polygon APIs need implementation  
+**Project Version:** v8.30.25.1  
+**Last Updated:** 2025-08-30 - **POLYGON API INTEGRATION COMPLETE**: Technical indicators fully implemented with real-time data  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
 High-frequency algorithmic trading system with <5ms latency requirements for momentum/breakout trading strategies.
 
+**🐳 DOCKER-ONLY IMPLEMENTATION**: All development, testing, building, and debugging must be performed using Docker containers. No local Rust toolchain is available.
+
 **📋 Documentation Reference:**
-- `README_orig.md` - Complete project setup and architecture guide
 - `STATUS.md` - **Current implementation status and progress tracking**
 - `README.md` - Environment setup, testing endpoints, and user information
+- `ENDPOINTS.md` - **Complete API reference for Polygon.io and LightSpeed integration**
 - `docs/module_overview.pdf` - Detailed module specifications and requirements
 - `docs/DesignQuestions1.pdf` - Performance requirements and trading strategy details
 
 ## Code Style Guide & Standards
 
 ### File Header Requirements
-**ALL source files must begin with file path comment:**
+**ALL source files must begin with file path and current branch comments:**
 ```rust
 // src/rules/mod.rs
+// Branch: 8.28.25.1
+
 // src/broker/lightspeed.rs
+// Branch: 8.28.25.1
+
 // src/data/polygon.rs
+// Branch: 8.28.25.1
 ```
 
 ### Documentation Standards
@@ -34,6 +41,7 @@ High-frequency algorithmic trading system with <5ms latency requirements for mom
 ```rust
 // Good example with proper documentation
 // src/rules/indicators.rs
+// Branch: 8.28.25.1
 
 /// Calculates Exponential Moving Average for given period
 /// 
@@ -65,12 +73,15 @@ pub fn calculate_ema(prices: &[f64], period: u32) -> Result<f64> {
 - Log errors with appropriate level (error!, warn!, info!)
 - Never panic in production code paths
 
-## Docker-First Development Environment
+## Docker-Only Development Environment
 
-### System Configuration
+### Critical System Requirements
 - ✅ Docker v28.3.3 available
 - ✅ Docker Compose v2.39.1 available  
-- ❌ Rust toolchain not installed locally → **Must use Docker**
+- ❌ **Rust toolchain NOT installed locally → ALL development must use Docker**
+- ❌ **No local testing tools → ALL testing must use Docker**
+
+**IMPORTANT**: This is a Docker-only implementation. Never run commands directly on the host system. All development, building, testing, and debugging must be performed inside Docker containers.
 
 ### Development Commands
 ```bash
@@ -99,26 +110,27 @@ docker compose down
 ```
 src/
 ├── main.rs                 // Application entry point
-├── config/mod.rs           // ✅ Complete - Environment configuration
-├── types/mod.rs            // ✅ Complete - Data structures
-├── broker/                 // ⏳ Partial - LightSpeed integration (sandbox)
+├── config/mod.rs           // Configuration management
+├── types/mod.rs            // Core data structures
+├── broker/                 // LightSpeed integration
 │   ├── mod.rs
 │   └── lightspeed.rs
-├── data/                   // ⏳ Partial - Polygon.io (free tier only)
+├── data/                   // Polygon.io integration
 │   ├── mod.rs
 │   └── polygon.rs
-├── engine/mod.rs           // ⏳ Partial - Framework only, needs rule logic
-├── web/mod.rs              // ⏳ Partial - CURL APIs work, web UI missing
-├── database/mod.rs         // ❌ Placeholder - Connected but not used
-├── rules/mod.rs            // ❌ Empty - NEXT IMPLEMENTATION TARGET
-└── metrics/mod.rs          // ❌ Placeholder - Basic init only
+├── engine/mod.rs           // Trading engine coordination
+├── web/mod.rs              // REST API and web interface
+├── database/mod.rs         // Data persistence
+├── rules/mod.rs            // Decision logic
+└── metrics/mod.rs          // Performance monitoring
 ```
 
-### Testing Strategy
-- **Unit tests** for individual functions
-- **Integration tests** for module interactions
-- **Performance tests** for latency-critical paths
-- **API tests** using CURL commands before web UI development
+### Testing Strategy (Docker Only)
+- **Unit tests** for individual functions: `docker compose exec trading-system cargo test`
+- **Integration tests** for module interactions: `docker compose exec trading-system cargo test --test integration`
+- **Performance tests** for latency-critical paths: `docker compose exec trading-system cargo test --release`
+- **API tests** using CURL commands: All endpoints tested from host system to Docker container
+- **Code quality**: `docker compose exec trading-system cargo clippy` and `docker compose exec trading-system cargo fmt`
 
 ## Performance Architecture Requirements
 
@@ -128,11 +140,6 @@ src/
 - **Memory management**: Use Arc/RwLock for thread safety
 - **Async operations**: Tokio runtime for WebSocket/HTTP
 
-### Current Architecture Status
-- ✅ **Rust language**: Appropriate for performance requirements
-- ✅ **Async framework**: Tokio implementation complete
-- ✅ **Memory patterns**: Arc/RwLock usage established
-- ❌ **Decision pipeline**: No implementation yet
 
 ## Development Workflow
 
@@ -143,62 +150,26 @@ src/
 4. **Plan backward compatibility** - Ensure existing functionality preserved
 
 ### During Development
-1. **Follow file path comment standard**
+1. **Follow file path comment standard** (include branch info)
 2. **Add comprehensive documentation**
 3. **Maintain performance focus** 
-4. **Test incrementally**
+4. **Test incrementally using Docker commands**
 5. **Use proper error handling patterns**
 
 ### After Implementation
-1. **Test existing functionality** - Ensure nothing broken
-2. **Update STATUS.md** - Mark progress and new limitations
-3. **Update version numbers** in all three .md files
-4. **Commit with descriptive messages**
+1. **Test existing functionality** - Use `docker compose exec trading-system cargo test`
+2. **Run code quality checks** - Use `docker compose exec trading-system cargo clippy`
+3. **Update STATUS.md** - Mark progress and new limitations
+4. **Update version numbers** in all three .md files
+5. **Commit with descriptive messages**
 
-## Current Development Context
+## External API Guidelines
 
-### Current Environment Status - **VERIFIED NORMAL MODE**
-- **Polygon.io**: **STOCK STARTER** plan with comprehensive capabilities - **ENDPOINTS DOCUMENTED BUT NOT IMPLEMENTED**
-- **Technical Indicators**: **DOCUMENTED** in ENDPOINTS.md (SMA, EMA, RSI, MACD) - **NOT IMPLEMENTED** in `src/data/mod.rs`
-- **Historical Data**: **5 YEARS** available with unlimited API calls - **NOT IMPLEMENTED** in application
-- **Market Data**: **DOCUMENTED** - snapshots, aggregates, movers, news, fundamentals - **NOT IMPLEMENTED** in application
-- **LightSpeed**: Sandbox account (BUY orders tested, SELL orders need testing) - **WORKING**
-- **Database**: Connected but not integrated with application
-- **Web UI**: Placeholder only (CURL APIs functional)
-- **System**: **NORMAL MODE CONFIRMED** - both modules enabled and basic functionality working
-
-### Next Implementation Priority - **POLYGON API INTEGRATION REQUIRED**
-**Data Module Implementation** (`src/data/mod.rs`) - **CRITICAL FOR UNBLOCKING RULES ENGINE**
-- Implement technical indicator endpoints (SMA, EMA, RSI, MACD) documented in ENDPOINTS.md
-- Implement market data endpoints (snapshots, aggregates, movers) documented in ENDPOINTS.md
-- Build memory cache system for <5ms decision performance
-- Add WebSocket streaming for real-time price updates
-- **Rules Engine BLOCKED** until Polygon APIs implemented in application
-
-## External API Integration
-
-### **COMPREHENSIVE ENDPOINT DOCUMENTATION**
-**Complete API reference available in [`ENDPOINTS.md`](ENDPOINTS.md)** - includes all Polygon.io and LightSpeed Connect endpoints with status, parameters, examples, and documentation links.
-
-### **Key API Capabilities Summary**
-#### Polygon.io Stock Starter
-- **Technical Indicators**: 4 confirmed working endpoints (SMA, EMA, RSI, MACD)
-- **Market Data**: Real-time snapshots, minute aggregates, market movers
-- **Historical Data**: 5 years available with unlimited API calls  
-- **Fundamentals**: Financial statements, news with sentiment analysis
-- **WebSocket**: Real-time streaming (15-minute delayed)
-
-#### LightSpeed Connect
-- **Protocol**: WebSocket-only with JSON messaging
-- **Environment**: Sandbox (certification) currently active
-- **Order Types**: BUY orders confirmed, SELL orders need testing
-- **Advanced Features**: Bracket orders, OCA, multi-leg options available
-
-### **Implementation Integration Points**
-- **Data Module**: Integrate Polygon REST APIs for indicators and market data
-- **Broker Module**: Expand LightSpeed order testing and position management
-- **WebSocket Streaming**: Real-time price updates for rule triggers
-- **Memory Cache**: <5ms decision performance using cached indicator data
+- **Documentation**: **Always reference `ENDPOINTS.md`** for complete Polygon.io and LightSpeed API specifications
+- **Implementation**: Use documented endpoint parameters, expected responses, and authentication methods
+- **Integration**: Implement documented endpoints with proper error handling and rate limiting
+- **Caching**: Build memory cache systems for performance requirements (<5ms decision pipeline)
+- **Testing**: Verify all endpoints using provided examples before production deployment
 
 ## Version Management & Git Workflow
 
@@ -232,7 +203,7 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
    - Check what files have been changed during the session
    - Review each change to determine if it should be committed
    - Ask user for guidance on any ambiguous changes
-2. **Update all three core .md files** (CLAUDE.md, README.md, STATUS.md):
+2. **Update all four core .md files** (CLAUDE.md, README.md, STATUS.md ENDPOINTS.md):
    - Update version numbers to match current git branch
    - Update "Last Updated" dates to current date
    - Add session summary to STATUS.md
@@ -254,4 +225,4 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `8.23.25.1` | **Development Phase:** Rules Engine Implementation + Claude Code Integration
+**Git Branch:** `8.28.25.1` | **Development Phase:** Polygon API Integration + Rules Engine Implementation

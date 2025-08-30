@@ -175,6 +175,10 @@ impl TradingEngine {
         broker.is_connected().await
     }
     
+    pub fn get_data_module(&self) -> &DataModule {
+        &self.data_module
+    }
+    
     pub async fn shutdown(&self) -> Result<()> {
         info!("Initiating trading engine shutdown");
         

@@ -7,6 +7,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub polygon_api_key: Option<String>,
+    pub polygon_use_delayed_data: bool,
     pub lightspeed_config: Option<LightspeedConfig>,
     pub max_memory_mb: u64,
     pub bind_address: String,
@@ -34,6 +35,11 @@ impl Config {
                 .unwrap_or_else(|_| "sqlite:./data/trading.db".to_string()),
             
             polygon_api_key: env::var("POLYGON_API_KEY").ok(),
+            
+            polygon_use_delayed_data: env::var("POLYGON_USE_DELAYED_DATA")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
             
             lightspeed_config: if env::var("LIGHTSPEED_API_KEY").is_ok() && env::var("LIGHTSPEED_ACCOUNT_ID").is_ok() {
                 Some(LightspeedConfig {
