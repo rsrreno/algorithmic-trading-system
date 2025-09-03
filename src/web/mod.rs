@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use crate::engine::TradingEngine;
 use crate::data::{SymbolDataResponse, MarketMoverData, MarketSnapshotTicker, DailyMarketSummaryTicker};
+use crate::types::Position;
 
 #[derive(Deserialize)]
 struct SymbolRequest {
@@ -188,6 +189,10 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         .route("/api/websocket/subscribe", post(websocket_subscribe))
         .route("/api/websocket/unsubscribe", post(websocket_unsubscribe))
         .route("/api/websocket/subscriptions", get(get_websocket_subscriptions))
+        
+        // Portfolio & Position endpoints
+        .route("/api/positions", get(get_positions))
+        .route("/api/portfolio", get(get_portfolio))
         .with_state(engine);
 
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
@@ -271,8 +276,8 @@ async fn root() -> &'static str {
         <p><strong>Place Order:</strong> <code>POST /api/order</code></p>
         <p><strong>Check Status:</strong> <code>GET /api/status</code></p>
         <p><strong>Example curl commands:</strong></p>
-        <p><code>curl -X POST http://localhost:8080/api/symbol -H "Content-Type: application/json" -d '{"symbol":"AMZN"}'</code></p>
-        <p><code>curl -X POST http://localhost:8080/api/order -H "Content-Type: application/json" -d '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":1,"price":150.0}'</code></p>
+        <p><code>curl -X POST http://localhost:8080/api/symbol -H "Content-Type: application/json" -d '{"symbol":"GOOGL"}'</code></p>
+        <p><code>curl -X POST http://localhost:8080/api/order -H "Content-Type: application/json" -d '{"symbol":"GOOGL","side":"BUY","order_type":"LIMIT","quantity":1,"price":150.0}'</code></p>
     </div>
 
     <script>
@@ -1201,6 +1206,108 @@ async fn get_websocket_subscriptions(
             Json(WebSocketSubscriptionsResponse {
                 success: false,
                 subscriptions: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// =====================================
+// Portfolio & Position Management
+// =====================================
+
+#[derive(Debug, Serialize)]
+struct PositionsResponse {
+    success: bool,
+    positions: Option<HashMap<String, Position>>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortfolioResponse {
+    success: bool,
+    portfolio: Option<PortfolioSummary>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortfolioSummary {
+    total_value: f64,
+    available_cash: f64,
+    total_exposure: f64,
+    position_count: usize,
+    positions: HashMap<String, Position>,
+    last_updated: String,
+}
+
+async fn get_positions(State(engine): State<Arc<TradingEngine>>) -> Json<PositionsResponse> {
+    tracing::info!("📊 Positions request");
+    
+    let broker_module = engine.get_broker_module().await;
+    
+    match broker_module.get_positions().await {
+        Ok(positions) => {
+            tracing::info!("✅ Retrieved {} positions from LightSpeed", positions.len());
+            Json(PositionsResponse {
+                success: true,
+                positions: Some(positions),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get positions: {}", e);
+            Json(PositionsResponse {
+                success: false,
+                positions: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_portfolio(State(engine): State<Arc<TradingEngine>>) -> Json<PortfolioResponse> {
+    tracing::info!("📈 Portfolio request");
+    
+    let broker_module = engine.get_broker_module().await;
+    
+    match broker_module.get_positions().await {
+        Ok(positions) => {
+            // Calculate portfolio summary
+            let mut total_value = 0.0;
+            let mut total_exposure = 0.0;
+            
+            for position in positions.values() {
+                let position_value = position.current_price * position.quantity as f64;
+                total_value += position_value;
+                total_exposure += position_value;
+            }
+            
+            // For now, use a default cash value - in production this would come from broker
+            let available_cash = 50000.0 - total_exposure; // Assume $50k account
+            
+            let portfolio_summary = PortfolioSummary {
+                total_value: available_cash + total_value,
+                available_cash,
+                total_exposure,
+                position_count: positions.len(),
+                positions: positions.clone(),
+                last_updated: chrono::Utc::now().to_rfc3339(),
+            };
+            
+            tracing::info!("✅ Portfolio calculated: ${:.2} total, {} positions", 
+                portfolio_summary.total_value, portfolio_summary.position_count);
+            
+            Json(PortfolioResponse {
+                success: true,
+                portfolio: Some(portfolio_summary),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get portfolio: {}", e);
+            Json(PortfolioResponse {
+                success: false,
+                portfolio: None,
                 error: Some(e.to_string()),
             })
         }

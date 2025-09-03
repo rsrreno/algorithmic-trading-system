@@ -171,28 +171,43 @@ test_endpoint "GET" "/" "" "Root endpoint (web interface)" ""
 # 2. Currently Implemented Endpoints
 print_header "2. CURRENTLY IMPLEMENTED ENDPOINTS"
 
-print_subheader "Symbol Data (Basic Polygon Integration)"
-test_endpoint "POST" "/api/symbol" '{"symbol":"AAPL"}' "Apple (AAPL) stock data" ".success"
-test_endpoint "POST" "/api/symbol" '{"symbol":"TSLA"}' "Tesla (TSLA) stock data" ".success"
-test_endpoint "POST" "/api/symbol" '{"symbol":"MSFT"}' "Microsoft (MSFT) stock data" ".success"
-test_endpoint "POST" "/api/symbol" '{"symbol":"GOOGL"}' "Google (GOOGL) stock data" ".success"
-test_endpoint "POST" "/api/symbol" '{"symbol":"META"}' "Meta (META) stock data" ".success"
-test_endpoint "POST" "/api/symbol" '{"symbol":"NVDA"}' "Nvidia (NVDA) stock data" ".success"
+print_subheader "Symbol Data (LightSpeed Test Symbols)"
+# Using LightSpeed certification environment test symbols
+test_endpoint "POST" "/api/symbol" '{"symbol":"GOOGL"}' "Google (GOOGL) - immediate fill symbol" ".success"
+test_endpoint "POST" "/api/symbol" '{"symbol":"AMZN"}' "Amazon (AMZN) - partial fill symbol" ".success"  
+test_endpoint "POST" "/api/symbol" '{"symbol":"TSLA"}' "Tesla (TSLA) - no fill symbol" ".success"
+test_endpoint "POST" "/api/symbol" '{"symbol":"MSFT"}' "Microsoft (MSFT) - rejection symbol" ".success"
+test_endpoint "POST" "/api/symbol" '{"symbol":"CHWY"}' "Chewy (CHWY) - multiple partial fills" ".success"
+test_endpoint "POST" "/api/symbol" '{"symbol":"F"}' "Ford (F) - multiple partial fills" ".success"
 
 print_subheader "Symbol Error Handling"
 test_endpoint "POST" "/api/symbol" '{"symbol":"INVALID123"}' "Invalid symbol handling" ""
 test_endpoint "POST" "/api/symbol" '{"invalid":"json"}' "Invalid JSON structure" ""
 test_endpoint "POST" "/api/symbol" '{}' "Empty symbol request" ""
 
-print_subheader "Order Management (LightSpeed Integration)"
-test_endpoint "POST" "/api/order" '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":1,"price":150.0}' "Apple BUY LIMIT order" ""
-test_endpoint "POST" "/api/order" '{"symbol":"TSLA","side":"BUY","order_type":"LIMIT","quantity":1,"price":200.0}' "Tesla BUY LIMIT order" ""
-test_endpoint "POST" "/api/order" '{"symbol":"MSFT","side":"BUY","order_type":"MARKET","quantity":1}' "Microsoft BUY MARKET order" ""
+print_subheader "LightSpeed Order Testing (Certification Environment)"
+echo -e "${YELLOW}⚠️  Testing with LightSpeed certification symbols - each exhibits specific behavior:${NC}"
+echo -e "${CYAN}   GOOGL: Immediate fill | AMZN: Partial fill | TSLA: No fill | MSFT: Rejection${NC}"
+echo -e "${CYAN}   CHWY/F/GE: Multiple partials | ORCL: Cancel test | BAC: Replace test${NC}"
+
+# Test each symbol behavior pattern
+test_endpoint "POST" "/api/order" '{"symbol":"GOOGL","side":"BUY","order_type":"LIMIT","quantity":10,"price":150.0}' "GOOGL - Immediate Fill Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"AMZN","side":"BUY","order_type":"LIMIT","quantity":10,"price":200.0}' "AMZN - Partial Fill Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"TSLA","side":"BUY","order_type":"LIMIT","quantity":10,"price":250.0}' "TSLA - No Fill Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"MSFT","side":"BUY","order_type":"LIMIT","quantity":10,"price":350.0}' "MSFT - Rejection Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"CHWY","side":"BUY","order_type":"LIMIT","quantity":10,"price":30.0}' "CHWY - Multiple Partials Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"F","side":"BUY","order_type":"LIMIT","quantity":10,"price":15.0}' "F - Multiple Partials Test" ""
+test_endpoint "POST" "/api/order" '{"symbol":"GE","side":"BUY","order_type":"LIMIT","quantity":10,"price":25.0}' "GE - Multiple Partials Test" ""
 
 print_subheader "Order Error Handling"
-test_endpoint "POST" "/api/order" '{"symbol":"AAPL","side":"INVALID","order_type":"LIMIT","quantity":1,"price":150.0}' "Invalid order side" ""
-test_endpoint "POST" "/api/order" '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":0,"price":150.0}' "Zero quantity order" ""
+test_endpoint "POST" "/api/order" '{"symbol":"GOOGL","side":"INVALID","order_type":"LIMIT","quantity":1,"price":150.0}' "Invalid order side" ""
+test_endpoint "POST" "/api/order" '{"symbol":"GOOGL","side":"BUY","order_type":"LIMIT","quantity":0,"price":150.0}' "Zero quantity order" ""
 test_endpoint "POST" "/api/order" '{}' "Empty order request" ""
+
+print_subheader "Portfolio & Position Management (LightSpeed Integration)"
+echo -e "${YELLOW}⚠️  Testing live LightSpeed position data from certification environment:${NC}"
+test_endpoint "GET" "/api/positions" "" "Get all current positions" ".success"
+test_endpoint "GET" "/api/portfolio" "" "Get portfolio summary with calculations" ".success"
 
 # 3. Polygon API Endpoints
 print_header "3. POLYGON API ENDPOINTS"

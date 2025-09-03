@@ -1,0 +1,280 @@
+[H[2J[3J[0;36m🚀 Trading System API Test Suite[0m
+[0;36mBased on ENDPOINTS.md v8.23.25.1[0m
+
+Testing server at: http://localhost:8080
+Timeout: 30s per request
+
+[0;34m════════════════════════════════════════[0m
+[0;34mPRE-FLIGHT CHECKS[0m
+[0;34m════════════════════════════════════════[0m
+[0;32m✅ Trading system container is running[0m
+
+[0;36m🧪 Testing: Server connectivity[0m
+[0;32m✅ PASS: Server is responding[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34m1. BASIC SYSTEM ENDPOINTS[0m
+[0;34m════════════════════════════════════════[0m
+
+[0;35m── Health & Status Checks ──[0m
+
+[0;36m🧪 Testing: Health check endpoint[0m
+[0;32m✅ PASS: Health check endpoint[0m
+[0;36m   Response: OK[0m
+
+[0;36m🧪 Testing: System status with broker connection[0m
+[0;32m✅ PASS: System status with broker connection[0m
+[0;36m   Response: {"broker_connected":true,"session_active":true,"message":"✅ Broker connected and ready for trading"}[0m
+
+[0;36m🧪 Testing: Root endpoint (web interface)[0m
+[0;32m✅ PASS: Root endpoint (web interface)[0m
+[0;36m   Response: <!DOCTYPE html>
+<html>
+<head>
+    <title>Trading System</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .status { backg...[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34m2. CURRENTLY IMPLEMENTED ENDPOINTS[0m
+[0;34m════════════════════════════════════════[0m
+
+[0;35m── Symbol Data (Basic Polygon Integration) ──[0m
+
+[0;36m🧪 Testing: Apple (AAPL) stock data[0m
+[0;32m✅ PASS: Apple (AAPL) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2025-08-29","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418586,"vwap":232.3211,"transactions":428914,"change":-0.3700000000000045...[0m
+
+[0;36m🧪 Testing: Tesla (TSLA) stock data[0m
+[0;32m✅ PASS: Tesla (TSLA) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"TSLA","date":"2025-08-29","open":347.23,"high":348.7499,"low":331.7,"close":333.87,"volume":81143873,"vwap":337.0308,"transactions":1143523,"change":-13.3600000000000...[0m
+
+[0;36m🧪 Testing: Microsoft (MSFT) stock data[0m
+[0;32m✅ PASS: Microsoft (MSFT) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"MSFT","date":"2025-08-29","open":508.66,"high":509.6,"low":504.4915,"close":506.69,"volume":20962242,"vwap":507.1779,"transactions":342029,"change":-1.970000000000027...[0m
+
+[0;36m🧪 Testing: Google (GOOGL) stock data[0m
+[0;32m✅ PASS: Google (GOOGL) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"GOOGL","date":"2025-08-29","open":210.51,"high":214.645,"low":210.2,"close":212.91,"volume":39726066,"vwap":212.496,"transactions":473058,"change":2.4000000000000057,...[0m
+
+[0;36m🧪 Testing: Meta (META) stock data[0m
+[0;32m✅ PASS: Meta (META) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"META","date":"2025-08-29","open":745.28,"high":747.14,"low":735.3466,"close":738.7,"volume":9070014,"vwap":739.423,"transactions":268426,"change":-6.579999999999927,"...[0m
+
+[0;36m🧪 Testing: Nvidia (NVDA) stock data[0m
+[0;32m✅ PASS: Nvidia (NVDA) stock data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"NVDA","date":"2025-08-29","open":178.11,"high":178.15,"low":173.145,"close":174.18,"volume":243245784,"vwap":174.5406,"transactions":2419593,"change":-3.9300000000000...[0m
+
+[0;35m── Symbol Error Handling ──[0m
+
+[0;36m🧪 Testing: Invalid symbol handling[0m
+[0;32m✅ PASS: Invalid symbol handling[0m
+[0;36m   Response: {"success":false,"data":null,"error":"No daily data found for INVALID123 on 2025-08-29"}[0m
+
+[0;36m🧪 Testing: Invalid JSON structure[0m
+[0;31m❌ FAIL: Invalid JSON structure[0m
+[0;31m   Error: HTTP 422[0m
+[0;36m   Response: Failed to deserialize the JSON body into the target type: missing field `symbol` at line 1 column 18[0m
+
+[0;36m🧪 Testing: Empty symbol request[0m
+[0;31m❌ FAIL: Empty symbol request[0m
+[0;31m   Error: HTTP 422[0m
+[0;36m   Response: Failed to deserialize the JSON body into the target type: missing field `symbol` at line 1 column 2[0m
+
+[0;35m── Order Management (LightSpeed Integration) ──[0m
+
+[0;36m🧪 Testing: Apple BUY LIMIT order[0m
+[0;32m✅ PASS: Apple BUY LIMIT order[0m
+[0;36m   Response: {"success":true,"order_id":"LSC5FD972A6E8B48BFBD","error":null}[0m
+
+[0;36m🧪 Testing: Tesla BUY LIMIT order[0m
+[0;32m✅ PASS: Tesla BUY LIMIT order[0m
+[0;36m   Response: {"success":true,"order_id":"LSD76ADABFBEB14F05A7","error":null}[0m
+
+[0;36m🧪 Testing: Microsoft BUY MARKET order[0m
+[0;32m✅ PASS: Microsoft BUY MARKET order[0m
+[0;36m   Response: {"success":true,"order_id":"LS14D06BEA36AC4EC69A","error":null}[0m
+
+[0;35m── Order Error Handling ──[0m
+
+[0;36m🧪 Testing: Invalid order side[0m
+[0;32m✅ PASS: Invalid order side[0m
+[0;36m   Response: {"success":true,"order_id":"LSC019E5E2057248A685","error":null}[0m
+
+[0;36m🧪 Testing: Zero quantity order[0m
+[0;32m✅ PASS: Zero quantity order[0m
+[0;36m   Response: {"success":true,"order_id":"LSE850B47E86334CB98F","error":null}[0m
+
+[0;36m🧪 Testing: Empty order request[0m
+[0;31m❌ FAIL: Empty order request[0m
+[0;31m   Error: HTTP 422[0m
+[0;36m   Response: Failed to deserialize the JSON body into the target type: missing field `symbol` at line 1 column 2[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34m3. POLYGON API ENDPOINTS[0m
+[0;34m════════════════════════════════════════[0m
+[0;36mTesting Polygon.io integration endpoints:[0m
+
+[0;35m── Technical Indicators ──[0m
+
+[0;36m🧪 Testing: SMA endpoint[0m
+[0;32m✅ PASS: SMA endpoint[0m
+[0;36m   Response: {"success":true,"value":205.36659999999992,"data":{"next_url":null,"request_id":"f82318db38dfffe54a06b3ae640c9de9","results":{"underlying":{"aggregates":null,"url":"https://api.polygon.io/v2/aggs/tick...[0m
+
+[0;36m🧪 Testing: EMA endpoint[0m
+[0;32m✅ PASS: EMA endpoint[0m
+[0;36m   Response: {"success":true,"value":208.26496847978476,"data":{"next_url":null,"request_id":"bda8271fb2fb0e293e01826dad64c956","results":{"underlying":{"aggregates":null,"url":"https://api.polygon.io/v2/aggs/tick...[0m
+
+[0;36m🧪 Testing: RSI endpoint[0m
+[0;32m✅ PASS: RSI endpoint[0m
+[0;36m   Response: {"success":true,"value":44.15255809998517,"data":{"next_url":null,"request_id":"b3c5af40ce891e2a9650d75cf1fcbae0","results":{"underlying":{"aggregates":null,"url":"https://api.polygon.io/v2/aggs/ticke...[0m
+
+[0;36m🧪 Testing: MACD endpoint[0m
+[0;32m✅ PASS: MACD endpoint[0m
+[0;36m   Response: {"success":true,"value":1.4533780494188877,"data":{"next_url":null,"request_id":"288731b40a18f7a010d91a1db2f3483f","results":{"underlying":{"aggregates":null,"url":"https://api.polygon.io/v2/aggs/tick...[0m
+
+[0;35m── Market Data & Snapshots ──[0m
+
+[0;36m🧪 Testing: Single ticker snapshot[0m
+[0;32m✅ PASS: Single ticker snapshot[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2025-08-29","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418586,"vwap":232.3211,"transactions":428914,"change":-0.3700000000000045...[0m
+
+[0;36m🧪 Testing: Top market gainers[0m
+[0;32m✅ PASS: Top market gainers[0m
+[0;36m   Response: {"success":true,"data":[],"error":null}[0m
+
+[0;36m🧪 Testing: Top market losers[0m
+[0;32m✅ PASS: Top market losers[0m
+[0;36m   Response: {"success":true,"data":[],"error":null}[0m
+
+[0;36m🧪 Testing: Market status[0m
+[0;32m✅ PASS: Market status[0m
+[0;36m   Response: {"success":true,"status":"CLOSED","error":null}[0m
+
+[0;36m🧪 Testing: Previous day data[0m
+[0;32m✅ PASS: Previous day data[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"previous_day","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418437,"vwap":232.321,"transactions":0,"change":0.0,"change_percent":0....[0m
+
+[0;36m🧪 Testing: Minute aggregates[0m
+[0;32m✅ PASS: Minute aggregates[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2024-01-01 to 2024-01-02","open":191.52,"high":192.53,"low":183.885,"close":185.2,"volume":68107209,"vwap":0.0,"transactions":847,"change":0.0,"change_p...[0m
+
+[0;35m── Reference Data ──[0m
+
+[0;36m🧪 Testing: All tickers list[0m
+[0;32m✅ PASS: All tickers list[0m
+[0;36m   Response: {"data":[{"active":true,"cik":"0001090872","composite_figi":"BBG000C2V3D6","currency_name":"usd","locale":"us","market":"stocks","name":"Agilent Technologies Inc.","primary_exchange":"XNYS","share_cla...[0m
+
+[0;36m🧪 Testing: Stock exchanges[0m
+[0;32m✅ PASS: Stock exchanges[0m
+[0;36m   Response: {"data":[{"acronym":"AMEX","asset_class":"stocks","id":1,"locale":"us","mic":"XASE","name":"NYSE American, LLC","operating_mic":"XNYS","participant_id":"A","type":"exchange","url":"https://www.nyse.co...[0m
+
+[0;36m🧪 Testing: Stock splits[0m
+[0;32m✅ PASS: Stock splits[0m
+[0;36m   Response: {"data":[{"execution_date":"2020-08-31","split_from":1.0,"split_to":4.0,"ticker":"AAPL"},{"execution_date":"2014-06-09","split_from":1.0,"split_to":7.0,"ticker":"AAPL"},{"execution_date":"2005-02-28",...[0m
+
+[0;35m── News & Fundamentals ──[0m
+
+[0;36m🧪 Testing: News with sentiment[0m
+[0;32m✅ PASS: News with sentiment[0m
+[0;36m   Response: {"success":true,"data":[{"article_url":"https://www.fool.com/investing/2025/08/30/motley-fool-celebrates-buffett-95th-birthday/?source=iedfolrf0000001","author":"Multiple Motley Fool Contributors","de...[0m
+
+[0;36m🧪 Testing: Financial statements[0m
+[0;32m✅ PASS: Financial statements[0m
+[0;36m   Response: {"data":[{"cik":"0000320193","company_name":"APPLE INC","end_date":"2025-06-28","filing_date":null,"financials":{"balance_sheet":{"accounts_payable":{"label":"Accounts Payable","order":710,"unit":"USD...[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34m4. ADDITIONAL FEATURES[0m
+[0;34m════════════════════════════════════════[0m
+
+[0;35m── WebSocket Endpoints (Not HTTP) ──[0m
+[1;33m⚠️  WebSocket streaming not testable via HTTP[0m
+[0;36m   Real-time data requires WebSocket connection to Polygon.io[0m
+
+[0;35m── Cache Management ──[0m
+
+[0;36m🧪 Testing: Cache statistics[0m
+[0;32m✅ PASS: Cache statistics[0m
+[0;36m   Response: {"success":true,"entries":4,"message":"Cache contains 4 entries","error":null}[0m
+
+[0;36m🧪 Testing: Cache cleanup[0m
+[1;33m⚠️  NOT IMPLEMENTED: Cache cleanup[0m
+[1;33m   Expected: Endpoint /api/cache/clear should be implemented[0m
+
+[0;35m── Rules Engine ──[0m
+
+[0;36m🧪 Testing: Trading rules list[0m
+[1;33m⚠️  NOT IMPLEMENTED: Trading rules list[0m
+[1;33m   Expected: Endpoint /api/rules should be implemented[0m
+
+[0;36m🧪 Testing: Create trading rule[0m
+[1;33m⚠️  NOT IMPLEMENTED: Create trading rule[0m
+[1;33m   Expected: Endpoint /api/rules should be implemented[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34m5. PERFORMANCE & LOAD TEST[0m
+[0;34m════════════════════════════════════════[0m
+
+[0;35m── Sequential Requests ──[0m
+
+[0;36m🧪 Testing: Sequential request #1[0m
+[0;32m✅ PASS: Sequential request #1[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2025-08-29","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418586,"vwap":232.3211,"transactions":428914,"change":-0.3700000000000045...[0m
+
+[0;36m🧪 Testing: Sequential request #2[0m
+[0;32m✅ PASS: Sequential request #2[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2025-08-29","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418586,"vwap":232.3211,"transactions":428914,"change":-0.3700000000000045...[0m
+
+[0;36m🧪 Testing: Sequential request #3[0m
+[0;32m✅ PASS: Sequential request #3[0m
+[0;36m   Response: {"success":true,"data":{"symbol":"AAPL","date":"2025-08-29","open":232.51,"high":233.38,"low":231.37,"close":232.14,"volume":39418586,"vwap":232.3211,"transactions":428914,"change":-0.3700000000000045...[0m
+
+[0;35m── Rapid Fire Test (No Delays) ──[0m
+[0;36mTesting rapid requests to check server stability...[0m
+
+[0;36m🧪 Testing: Rapid request #1[0m
+[0;32m✅ PASS: Rapid request #1[0m
+
+[0;36m🧪 Testing: Rapid request #2[0m
+[0;32m✅ PASS: Rapid request #2[0m
+
+[0;36m🧪 Testing: Rapid request #3[0m
+[0;32m✅ PASS: Rapid request #3[0m
+
+[0;36m🧪 Testing: Rapid request #4[0m
+[0;32m✅ PASS: Rapid request #4[0m
+
+[0;36m🧪 Testing: Rapid request #5[0m
+[0;32m✅ PASS: Rapid request #5[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34mTEST RESULTS SUMMARY[0m
+[0;34m════════════════════════════════════════[0m
+📊 [0;34mTotal Tests Run: 50[0m
+✅ [0;32mTests Passed: 45[0m
+❌ [0;31mTests Failed: 3[0m
+📈 [0;36mSuccess Rate: 90%[0m
+
+⚠️  [1;33m3 test(s) failed[0m
+[1;33mCheck the failed endpoints above - they may indicate implementation issues.[0m
+
+[0;34m════════════════════════════════════════[0m
+[0;34mIMPLEMENTATION STATUS REPORT[0m
+[0;34m════════════════════════════════════════[0m
+[0;36mTest results summary (status determined by actual test outcomes):[0m
+[0;32m✅ WORKING ENDPOINTS: 45[0m
+[0;31m❌ FAILED/NOT IMPLEMENTED: 3[0m
+
+[0;34m📋 DEVELOPMENT STATUS:[0m
+   • Test results above show actual implementation status
+   • See individual test results for specific endpoint status
+   • Failed tests indicate missing or broken functionality
+
+[0;35m💡 TO RUN ADDITIONAL TESTS:[0m
+   • Start system: [0;36mdocker compose up -d[0m
+   • View logs: [0;36mdocker compose logs -f trading-system[0m
+   • Restart system: [0;36mdocker compose restart[0m
+   • Stop system: [0;36mdocker compose down[0m
+
+[0;34mTesting completed at Sat Aug 30 09:19:28 AM PDT 2025[0m

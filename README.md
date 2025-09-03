@@ -42,7 +42,7 @@ POLYGON_WEBSOCKET_RECONNECT_INTERVAL=5
 POLYGON_WEBSOCKET_HEARTBEAT_INTERVAL=30
 POLYGON_WEBSOCKET_MAX_SUBSCRIPTIONS=100
 POLYGON_WEBSOCKET_BUFFER_SIZE=1000
-POLYGON_DEFAULT_SUBSCRIPTIONS=AAPL,TSLA,MSFT,GOOGL,AMZN
+POLYGON_DEFAULT_SUBSCRIPTIONS=GOOGL,AMZN,TSLA,MSFT,CHWY
 POLYGON_AUTO_SUBSCRIBE_MOVERS=true
 
 # LightSpeed Broker Configuration  
@@ -80,9 +80,10 @@ curl http://localhost:8080/api/status
 #### Market Data (Polygon.io Integration)
 ```bash
 # Symbol lookup with daily data
+# Use LightSpeed certification test symbols for consistent behavior
 curl -X POST http://localhost:8080/api/symbol \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL"}'
+  -d '{"symbol":"GOOGL"}'
 
 # Example response:
 {
@@ -251,14 +252,37 @@ curl -s -X POST "http://localhost:8080/api/websocket/unsubscribe" \
 - **Memory cache**: WebSocket data populates same cache as REST API (<1ms access)
 - **URL switching**: Automatically uses correct delayed vs real-time endpoint
 
+### 🧪 **LightSpeed Certification Test Symbols**
+
+**⚠️ IMPORTANT:** The LightSpeed certification environment only accepts specific test symbols that exhibit predefined behaviors to replicate real-world trading scenarios. **Use only these symbols for testing.**
+
+| Symbol | Behavior | Use Case |
+|--------|----------|----------|
+| **GOOGL** | Immediate fill | Test successful order execution |
+| **AMZN** | Partial fill, balance remains open | Test partial fill handling |
+| **CHWY** | Multiple partial fills until complete | Test incremental fill processing |
+| **F** | Multiple partial fills until complete | Test incremental fill processing |
+| **GE** | Multiple partial fills until complete | Test incremental fill processing |
+| **MSFT** | Order rejection | Test error handling |
+| **TSLA** | Order does not fill | Test unfilled order management |
+| **ORCL** | Order cancel scenario | Test cancellation logic |
+| **BAC** | Order replace (increase quantity) | Test order modification |
+
+**Testing Strategy:**
+- Use **GOOGL** for reliable immediate fills
+- Use **MSFT** to test rejection handling
+- Use **AMZN** to test partial fill logic
+- Use **TSLA** to test timeout/unfilled scenarios
+
 #### Order Management (LightSpeed Integration - Sandbox)
 ```bash
 # Place buy order (TESTED AND WORKING)
+# Use GOOGL (immediate fill) for reliable testing
 curl -X POST http://localhost:8080/api/order \
   -H "Content-Type: application/json" \
   -d '{
-    "symbol": "AAPL",
-    "side": "BUY",
+    "symbol": "GOOGL",
+    "side": "BUY", 
     "order_type": "LIMIT",
     "quantity": 1,
     "price": 150.00
@@ -272,6 +296,51 @@ curl -X POST http://localhost:8080/api/order \
 }
 ```
 
+#### Portfolio & Position Management (LightSpeed Integration)
+```bash
+# Get all current positions from LightSpeed
+curl http://localhost:8080/api/positions
+
+# Get portfolio summary with calculations
+curl http://localhost:8080/api/portfolio
+
+# Example positions response:
+{
+  "success": true,
+  "positions": {
+    "GOOGL": {
+      "id": "8e2a1a9d-6851-4f5b-8f81-ba8e7dbbebf9",
+      "symbol": "GOOGL",
+      "side": "Long",
+      "quantity": 20,
+      "entry_price": 0.0,
+      "current_price": 0.0,
+      "opened_at": "2025-09-03T01:14:26.675610364Z",
+      "status": "Open"
+    }
+  }
+}
+
+# Example portfolio response:
+{
+  "success": true,
+  "portfolio": {
+    "total_value": 50000.0,
+    "available_cash": 50000.0,
+    "total_exposure": 0.0,
+    "position_count": 6,
+    "positions": { ... },
+    "last_updated": "2025-09-03T01:14:47.261367865+00:00"
+  }
+}
+```
+
+**Features:**
+- **Real-time data**: Direct from LightSpeed certification environment
+- **6 test positions**: Using LightSpeed test symbols (GOOGL, AMZN, TSLA, MSFT, CHWY, F, GE)
+- **Live calculations**: Portfolio value, exposure, available cash
+- **WebSocket integration**: Positions update automatically via WebSocket messages
+
 ### Current Capabilities
 - **Technical Indicators**: Complete implementation (SMA, EMA, RSI, MACD) with real Polygon data
 - **Market Data**: Complete implementation (snapshots, aggregates, movers, full market snapshot, daily summaries)
@@ -279,6 +348,8 @@ curl -X POST http://localhost:8080/api/order \
 - **News Integration**: Complete implementation with AI-powered sentiment analysis
 - **Financial Data**: Complete implementation (balance sheets, income statements, cash flow)
 - **Order Management**: BUY orders working (SELL orders in testing)  
+- **Portfolio Management**: Real-time positions and portfolio calculations from LightSpeed
+- **Position Tracking**: Live WebSocket-based position updates from certification environment
 - **Performance**: In-memory caching system for <5ms decision latency
 - **Web Interface**: Full REST API implemented, web UI in development
 

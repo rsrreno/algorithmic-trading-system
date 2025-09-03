@@ -10,6 +10,7 @@ use crate::config::LightspeedConfig;
 use crate::types::Position;
 pub use lightspeed::{LightspeedBroker, BrokerEvent};
 
+#[derive(Debug)]
 pub struct BrokerModule {
     lightspeed: Option<Arc<LightspeedBroker>>,
     lightspeed_enabled: bool,

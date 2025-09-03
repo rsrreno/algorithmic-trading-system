@@ -302,8 +302,9 @@ impl DataModule {
 
     /// Test API connection using available endpoints for current plan
     pub async fn test_connection(&self) -> Result<()> {
-        info!("Testing Polygon.io API connection with AMZN daily data...");
-        self.get_yesterday_daily_data("AMZN").await
+        // Test with LightSpeed certification symbol (GOOGL = immediate fill behavior)
+        info!("Testing Polygon.io API connection with GOOGL daily data...");
+        self.get_yesterday_daily_data("GOOGL").await
     }
 
     // ===============================

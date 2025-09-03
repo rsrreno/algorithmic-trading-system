@@ -302,10 +302,57 @@ This document contains a comprehensive inventory of all external API endpoints u
 
 ### Position Management
 
-#### Position Updates
-- **Status:** ❌ **NOT IMPLEMENTED**
-- **Implementation Needed:** Position tracking from execution reports
-- **Data Needed:** Current positions, P&L, exposure
+#### Get Current Positions
+- **Endpoint:** `GET /api/positions`
+- **Status:** ✅ **IMPLEMENTED & WORKING**
+- **Implementation:** Direct access to LightSpeed position data
+- **Response:** Complete position details including quantities, prices, timestamps
+- **Example Response:**
+```json
+{
+  "success": true,
+  "positions": {
+    "GOOGL": {
+      "id": "8e2a1a9d-6851-4f5b-8f81-ba8e7dbbebf9",
+      "symbol": "GOOGL",
+      "side": "Long",
+      "quantity": 20,
+      "entry_price": 0.0,
+      "current_price": 0.0,
+      "opened_at": "2025-09-03T01:14:26.675610364Z",
+      "closed_at": null,
+      "status": "Open"
+    }
+  }
+}
+```
+
+#### Get Portfolio Summary  
+- **Endpoint:** `GET /api/portfolio`
+- **Status:** ✅ **IMPLEMENTED & WORKING**
+- **Implementation:** Real-time portfolio calculations with LightSpeed data
+- **Response:** Total value, available cash, exposure, position count
+- **Features:** Live position data, calculated portfolio metrics
+- **Example Response:**
+```json
+{
+  "success": true,
+  "portfolio": {
+    "total_value": 50000.0,
+    "available_cash": 50000.0,
+    "total_exposure": 0.0,
+    "position_count": 6,
+    "positions": { ... },
+    "last_updated": "2025-09-03T01:14:47.261367865+00:00"
+  }
+}
+```
+
+#### Position Updates (WebSocket)
+- **Status:** ✅ **IMPLEMENTED & WORKING**
+- **Implementation:** Automatic position tracking from LightSpeed execution reports
+- **Data Flow:** WebSocket → Memory → REST API
+- **Update Frequency:** Real-time via WebSocket message handling
 
 ### Market Data (via Third-Party Integration)
 
@@ -353,6 +400,32 @@ This document contains a comprehensive inventory of all external API endpoints u
 - **URL:** `wss://onboarding.connecttrade.com:28052`
 - **Features:** Full simulation environment for testing
 - **Supported:** Test orders, realistic execution scenarios, error testing
+
+#### Test Symbols - Certification Mode
+**⚠️ IMPORTANT:** The LightSpeed certification environment only accepts specific test symbols that exhibit predefined behaviors to replicate real-world trading scenarios. **Only use these symbols for testing.**
+
+| Test Symbol | Behavior Description |
+|-------------|---------------------|
+| **AMZN** | Order **partially fills**; balance of order remains open |
+| **CHWY** | Order receives **partial fills until completed** |
+| **F** | Order receives **partial fills until completed** |
+| **GE** | Order receives **partial fills until completed** |
+| **GOOGL** | Order **fills immediately** |
+| **MSFT** | Order is **rejected** |
+| **TSLA** | Order **does not fill** (remains open) |
+| **ORCL** | Order **Cancel** scenario testing |
+| **BAC** | Order **Replace** scenario (increase quantity) |
+
+**Testing Strategy:**
+- Use **GOOGL** for immediate fill testing
+- Use **AMZN** for partial fill handling  
+- Use **CHWY, F, GE** for multiple partial fills
+- Use **MSFT** for rejection handling
+- Use **TSLA** for unfilled order management
+- Use **ORCL** for cancel functionality
+- Use **BAC** for order modification testing
+
+**Documentation Reference:** https://lightspeed-connect.connecttrade.com/developers/documentation/getting-started-guide#using-the-api-console-for-order-testing
 
 #### Production Environment
 - **Status:** ❌ **NOT ACTIVATED**
