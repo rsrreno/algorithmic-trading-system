@@ -1,13 +1,13 @@
 # Algorithmic Trading System
 
-**Project Version:** v8.30.25.1  
-**Last Updated:** 2025-08-30 - **POLYGON API INTEGRATION COMPLETE**: Technical indicators fully implemented with real-time data  
+**Project Version:** v8.28.25.1  
+**Last Updated:** 2025-09-02 - **POLYGON WEBSOCKET INTEGRATION COMPLETE**: Real-time streaming implemented with full REST API management  
 **Related Files:** `CLAUDE.md`, `STATUS.md`
 
 ## Overview
 High-frequency algorithmic trading system built in Rust for momentum and breakout trading strategies. Features <5ms decision latency and integrations with Polygon.io data feeds and LightSpeed brokerage.
 
-**Current Status**: Technical indicators operational with real Polygon data, ready for rules engine development
+**Current Status**: Polygon.io API integration complete including WebSocket streaming - market data, technical indicators, news, reference data, and real-time streaming all implemented and working. Rules engine implementation ready to begin.
 
 ## Quick Start
 
@@ -34,6 +34,16 @@ cp .env.example .env
 ```env
 # Polygon.io Data Feed Configuration
 POLYGON_API_KEY=your_polygon_api_key_here
+POLYGON_USE_DELAYED_DATA=true
+
+# WebSocket Configuration (Optional - Real-time Streaming)
+POLYGON_ENABLE_WEBSOCKET=true
+POLYGON_WEBSOCKET_RECONNECT_INTERVAL=5
+POLYGON_WEBSOCKET_HEARTBEAT_INTERVAL=30
+POLYGON_WEBSOCKET_MAX_SUBSCRIPTIONS=100
+POLYGON_WEBSOCKET_BUFFER_SIZE=1000
+POLYGON_DEFAULT_SUBSCRIPTIONS=AAPL,TSLA,MSFT,GOOGL,AMZN
+POLYGON_AUTO_SUBSCRIBE_MOVERS=true
 
 # LightSpeed Broker Configuration  
 LIGHTSPEED_API_KEY=your_lightspeed_api_key_here
@@ -91,6 +101,156 @@ curl -X POST http://localhost:8080/api/symbol \
 }
 ```
 
+#### Technical Indicators (Polygon.io Integration)
+```bash
+# Simple Moving Average (SMA) - 50-day window
+curl -s "http://localhost:8080/api/indicators/sma/AAPL?window=50&timespan=day"
+
+# Exponential Moving Average (EMA) - 50-day window  
+curl -s "http://localhost:8080/api/indicators/ema/AAPL?window=50&timespan=day"
+
+# Relative Strength Index (RSI) - 14-day window
+curl -s "http://localhost:8080/api/indicators/rsi/AAPL?window=14&timespan=day"
+
+# Moving Average Convergence Divergence (MACD)
+curl -s "http://localhost:8080/api/indicators/macd/AAPL?short_window=12&long_window=26&signal_window=9"
+
+# Example response:
+{
+  "success": true,
+  "value": 205.36659999999992,
+  "data": {
+    "request_id": "828cae7a1e7c3cd5b281572ab978c134",
+    "results": {
+      "underlying": {
+        "aggregates": null,
+        "url": "https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/day/..."
+      }
+    }
+  }
+}
+```
+
+#### Market Data & News (Polygon.io Integration)
+```bash
+# Single ticker snapshot
+curl -s "http://localhost:8080/api/snapshot/AAPL"
+
+# News with sentiment analysis
+curl -s "http://localhost:8080/api/news?ticker=AAPL&limit=5"
+
+# Market movers (gainers and losers)
+curl -s "http://localhost:8080/api/market/movers/gainers?limit=10"
+curl -s "http://localhost:8080/api/market/movers/losers?limit=10"
+
+# Full market snapshot (all US stocks)
+curl -s "http://localhost:8080/api/market/snapshot/full"
+
+# Daily market summary for specific date
+curl -s "http://localhost:8080/api/market/summary?date=2024-08-29"
+
+# Previous day bar data
+curl -s "http://localhost:8080/api/market/previous/AAPL"
+
+# Minute aggregates for date range
+curl -s "http://localhost:8080/api/market/minute/AAPL?from=2024-08-29&to=2024-08-29"
+
+# Market status
+curl -s "http://localhost:8080/api/market/status"
+
+# Example news response:
+{
+  "success": true,
+  "data": [
+    {
+      "title": "Apple Stock Analysis Update",
+      "author": "Market Analyst",
+      "published_utc": "2025-08-30T12:00:00Z",
+      "insights": [
+        {
+          "ticker": "AAPL",
+          "sentiment": "positive",
+          "sentiment_reasoning": "Strong quarterly results with revenue growth"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Reference Data & Fundamentals (Polygon.io Integration)
+```bash
+# All US stock tickers (limit 10 for demo)
+curl -s "http://localhost:8080/api/reference/tickers?limit=10"
+
+# Stock exchanges with MIC codes
+curl -s "http://localhost:8080/api/reference/exchanges"
+
+# Stock splits history for a specific ticker
+curl -s "http://localhost:8080/api/reference/splits/AAPL"
+
+# Financial statements (balance sheet, income, cash flow)
+curl -s "http://localhost:8080/api/financials/AAPL"
+
+# Example financials response:
+{
+  "success": true,
+  "data": [
+    {
+      "company_name": "Apple Inc.",
+      "end_date": "2025-06-28",
+      "timeframe": "quarterly",
+      "financials": {
+        "balance_sheet": {
+          "assets": {"value": 331495000000.0, "unit": "USD"},
+          "equity": {"value": 65830000000.0, "unit": "USD"}
+        },
+        "income_statement": {
+          "revenues": {"value": 94036000000.0, "unit": "USD"},
+          "net_income_loss": {"value": 23434000000.0, "unit": "USD"}
+        }
+      }
+    }
+  ]
+}
+```
+
+#### WebSocket Real-time Streaming (Optional)
+```bash
+# Check WebSocket connection status
+curl -s "http://localhost:8080/api/websocket/status"
+
+# Get current WebSocket subscriptions
+curl -s "http://localhost:8080/api/websocket/subscriptions"
+
+# Subscribe to additional symbols
+curl -s -X POST "http://localhost:8080/api/websocket/subscribe" \
+  -H "Content-Type: application/json" \
+  -d '{"symbols": ["AAPL", "NVDA", "META"]}'
+
+# Unsubscribe from symbols
+curl -s -X POST "http://localhost:8080/api/websocket/unsubscribe" \
+  -H "Content-Type: application/json" \
+  -d '{"symbols": ["META"]}'
+
+# Example WebSocket status response:
+{
+  "success": true,
+  "websocket_enabled": true,
+  "status": "Authenticated",
+  "url": "wss://delayed.polygon.io/stocks",
+  "subscriptions_count": 7,
+  "error": null
+}
+```
+
+**WebSocket Features:**
+- **Real-time streaming**: Delayed (15-min) or real-time data based on Polygon plan
+- **Dynamic subscriptions**: Add/remove symbols via REST API without restart
+- **Background processing**: Non-blocking operation, REST API continues working
+- **Memory cache**: WebSocket data populates same cache as REST API (<1ms access)
+- **URL switching**: Automatically uses correct delayed vs real-time endpoint
+
 #### Order Management (LightSpeed Integration - Sandbox)
 ```bash
 # Place buy order (TESTED AND WORKING)
@@ -113,11 +273,14 @@ curl -X POST http://localhost:8080/api/order \
 ```
 
 ### Current Capabilities
-- **Order Management**: BUY orders working (SELL orders in testing)
-- **Market Data**: Basic daily aggregates implemented
-- **Technical Indicators**: Available via Polygon API (implementation in progress)
-- **Account**: Sandbox environment for development
-- **Web Interface**: REST API functional, web UI in development
+- **Technical Indicators**: Complete implementation (SMA, EMA, RSI, MACD) with real Polygon data
+- **Market Data**: Complete implementation (snapshots, aggregates, movers, full market snapshot, daily summaries)
+- **Reference Data**: Complete implementation (tickers, exchanges, splits, market status) 
+- **News Integration**: Complete implementation with AI-powered sentiment analysis
+- **Financial Data**: Complete implementation (balance sheets, income statements, cash flow)
+- **Order Management**: BUY orders working (SELL orders in testing)  
+- **Performance**: In-memory caching system for <5ms decision latency
+- **Web Interface**: Full REST API implemented, web UI in development
 
 ## Web Interface
 
@@ -159,8 +322,8 @@ Access the web interface at: http://localhost:8080
 **Broker**: LightSpeed sandbox account - development and testing environment
 
 ### Next Development Steps
-1. **Polygon API Integration**: Implement technical indicators and market data endpoints
-2. **Rules Engine**: Build algorithmic decision logic
+1. **Rules Engine**: Build algorithmic decision logic using implemented market data APIs
+2. **WebSocket Streaming**: Add real-time data feeds for live market updates
 3. **Broker Testing**: Complete order type testing and position management
 4. **Web Interface**: Build functional trading dashboard
 

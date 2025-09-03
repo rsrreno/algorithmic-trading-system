@@ -1,7 +1,7 @@
 # API Endpoints Documentation
 
-**Project Version:** v8.23.25.1  
-**Last Updated:** 2025-08-26  
+**Project Version:** v8.28.25.1  
+**Last Updated:** 2025-09-02  
 **Related Files:** `CLAUDE.md`, `STATUS.md`, `README.md`
 
 This document contains a comprehensive inventory of all external API endpoints used by the trading system, their current implementation status, and related documentation links.
@@ -16,12 +16,21 @@ This document contains a comprehensive inventory of all external API endpoints u
 **Rate Limits:** Unlimited API calls  
 **Data Delay:** 15 minutes (real-time available on higher tiers)
 
+**⚠️ Testing Notes:**
+- **Market Hours Dependency:** Some endpoints (market movers, real-time data) return empty results when markets are closed
+- **Subscription Limitations:** Some endpoints may require higher tier plans for full functionality  
+- **Testing Recommendation:** Test market-dependent endpoints during US market hours for accurate results:
+  - **Pre-Market:** 4:00 AM - 9:30 AM ET
+  - **Regular Hours:** 9:30 AM - 4:00 PM ET  
+  - **After-Hours:** 4:00 PM - 8:00 PM ET
+  - **Note:** Extended hours data may have different availability/pricing on Stock Starter plan
+
 ### Technical Indicators
 
 #### Simple Moving Average (SMA)
 - **Endpoint:** `GET /v1/indicators/sma/{stockTicker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING**
 - **Parameters:**
   - `timestamp`: Date or millisecond timestamp
   - `timespan`: Size of aggregate time window (day, week, month)
@@ -34,15 +43,15 @@ This document contains a comprehensive inventory of all external API endpoints u
 
 #### Exponential Moving Average (EMA)
 - **Endpoint:** `GET /v1/indicators/ema/{stockTicker}`
-- **Status:** ✅ **AVAILABLE** (same structure as SMA)
-- **Implementation:** Not implemented
+- **Status:** ✅ **TESTED & WORKING**
+- **Implementation:** ✅ **IMPLEMENTED & WORKING**
 - **Parameters:** Same as SMA with EMA-specific window calculations
 - **Documentation:** https://polygon.io/docs/rest/stocks/technical-indicators/exponential-moving-average
 
 #### Relative Strength Index (RSI)
 - **Endpoint:** `GET /v1/indicators/rsi/{stockTicker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING**
 - **Parameters:**
   - `window`: Size of RSI calculation window (default: 14)
   - Other parameters same as SMA
@@ -52,7 +61,7 @@ This document contains a comprehensive inventory of all external API endpoints u
 #### Moving Average Convergence Divergence (MACD)
 - **Endpoint:** `GET /v1/indicators/macd/{stockTicker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING**
 - **Parameters:**
   - `short_window`: Short window size for MACD calculation (default: 12)
   - `long_window`: Long window size for MACD calculation (default: 26)
@@ -65,28 +74,34 @@ This document contains a comprehensive inventory of all external API endpoints u
 
 #### Single Ticker Snapshot
 - **Endpoint:** `GET /v2/snapshot/locale/us/markets/stocks/tickers/{ticker}`
-- **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented (basic version exists in data module)
-- **Response:** Real-time OHLCV, minute data, previous day data
+- **Status:** ✅ **IMPLEMENTED & WORKING**
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/snapshot/{symbol}` endpoint)
+- **Data Delay:** 15-minute delay on Stock Starter plan (real-time requires higher tier)
+- **Response:** OHLCV, minute data, previous day data with current pricing
 - **Example:** `{"ticker":{"ticker":"AAPL","todaysChange":-0.69,"day":{"o":226.48,"h":229.3,"l":226.23,"c":227.16,"v":3.0982024e+07}}}`
 
 #### Full Market Snapshot
 - **Endpoint:** `GET /v2/snapshot/locale/us/markets/stocks`
-- **Status:** ✅ **AVAILABLE** (structure confirmed)
-- **Implementation:** Not implemented
+- **Status:** ✅ **TESTED & WORKING**
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/snapshot/full` endpoint)
 - **Response:** All US stock snapshots in single call
+- **Web API Route:** `GET /api/market/snapshot/full`
+- **Cache:** In-memory cache with 5-minute TTL for <5ms performance
+- **Market Hours Note:** Returns empty/404 when markets are closed
 
 #### Top Market Movers
 - **Endpoint:** `GET /v2/snapshot/locale/us/markets/stocks/gainers`
 - **Endpoint:** `GET /v2/snapshot/locale/us/markets/stocks/losers`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/movers/gainers` and `/api/market/movers/losers` endpoints)
+- **Cache:** In-memory cache with 5-minute TTL for <5ms performance
+- **Market Hours Note:** Returns empty results when markets are closed
 - **Example Response:** Top 20 gainers with full ticker data including change percentages
 
 #### Minute Aggregates
 - **Endpoint:** `GET /v2/aggs/ticker/{ticker}/range/1/minute/{from}/{to}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/minute/{symbol}?from={date}&to={date}` endpoint)
 - **Parameters:** Date range, adjustment settings
 - **Response:** OHLCV data per minute with transaction counts
 - **Example:** `{"results":[{"v":3107,"vw":227.5691,"o":227.9,"c":227.45,"h":227.9,"l":227.39,"t":1756108800000}]}`
@@ -94,21 +109,26 @@ This document contains a comprehensive inventory of all external API endpoints u
 #### Previous Day Bar
 - **Endpoint:** `GET /v2/aggs/ticker/{ticker}/prev`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/previous/{symbol}` endpoint)
+- **Cache:** In-memory cache with 5-minute TTL for <5ms performance
 - **Response:** Complete previous trading day OHLCV data
 
-#### Daily Market Summary
+#### Daily Market Summary  
 - **Endpoint:** `GET /v2/aggs/grouped/locale/us/market/stocks/{date}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
-- **Response:** All tickers' daily aggregates for specified date
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/summary?date={date}` endpoint)
+- **Response:** All tickers' daily aggregates for specified date (tested with 10,532+ tickers)
+- **Web API Route:** `GET /api/market/summary?date=YYYY-MM-DD`
+- **Cache:** In-memory cache with 5-minute TTL for <5ms performance
+- **Default:** Uses yesterday's date if no date parameter provided
+- **Example Response:** Returns daily OHLCV data for all active US stocks for the specified trading day
 
 ### Reference & Corporate Data
 
 #### All Tickers
 - **Endpoint:** `GET /v3/reference/tickers?market=stocks`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/reference/tickers?limit={limit}` endpoint)
 - **Response:** Complete US stock ticker list with metadata (name, type, exchange)
 - **Pagination:** Supports cursor-based pagination
 
@@ -120,19 +140,20 @@ This document contains a comprehensive inventory of all external API endpoints u
 #### Stock Exchanges
 - **Endpoint:** `GET /v3/reference/exchanges?market=stocks`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/reference/exchanges` endpoint)
 - **Response:** All US stock exchanges with MIC codes and details
 
 #### Market Status
 - **Endpoint:** `GET /v1/marketstatus/now`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Partially implemented (basic version exists)
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/market/status` endpoint)
+- **Cache:** In-memory cache with 5-minute TTL for <5ms performance
 - **Response:** Current market open/closed status for all asset classes
 
 #### Stock Splits
 - **Endpoint:** `GET /v3/reference/splits?ticker={ticker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/reference/splits/{symbol}` endpoint)
 - **Example Response:** `{"results":[{"execution_date":"2020-08-31","split_from":1,"split_to":4,"ticker":"AAPL"}]}`
 
 #### Market Holidays
@@ -150,14 +171,14 @@ This document contains a comprehensive inventory of all external API endpoints u
 #### Financial Statements
 - **Endpoint:** `GET /vX/reference/financials?ticker={ticker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/financials/{symbol}` endpoint)
 - **Response:** Complete financial statements (income, balance sheet, cash flow)
 - **Example:** Full AAPL financials with TTM data
 
 #### News with Sentiment Analysis
 - **Endpoint:** `GET /v2/reference/news?ticker={ticker}`
 - **Status:** ✅ **TESTED & WORKING**
-- **Implementation:** Not implemented
+- **Implementation:** ✅ **IMPLEMENTED & WORKING** (via `/api/news?ticker={ticker}&limit={limit}` endpoint)
 - **Response:** Recent news articles with AI-generated sentiment analysis per ticker
 - **Features:** Publisher info, article URLs, sentiment reasoning
 

@@ -8,12 +8,24 @@ pub struct Config {
     pub database_url: String,
     pub polygon_api_key: Option<String>,
     pub polygon_use_delayed_data: bool,
+    pub polygon_websocket_config: Option<PolygonWebSocketConfig>,
     pub lightspeed_config: Option<LightspeedConfig>,
     pub max_memory_mb: u64,
     pub bind_address: String,
     pub metrics_address: String,
     pub enable_polygon: bool,
     pub enable_lightspeed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolygonWebSocketConfig {
+    pub enabled: bool,
+    pub reconnect_interval_secs: u64,
+    pub heartbeat_interval_secs: u64,
+    pub max_subscriptions: usize,
+    pub buffer_size: usize,
+    pub default_subscriptions: Vec<String>,
+    pub auto_subscribe_movers: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,16 +42,55 @@ impl Config {
         // Load .env file if it exists (for development)
         dotenvy::dotenv().ok();
 
+        let polygon_api_key = env::var("POLYGON_API_KEY").ok();
+        
         let config = Config {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:./data/trading.db".to_string()),
             
-            polygon_api_key: env::var("POLYGON_API_KEY").ok(),
+            polygon_api_key: polygon_api_key.clone(),
             
             polygon_use_delayed_data: env::var("POLYGON_USE_DELAYED_DATA")
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()
                 .unwrap_or(true),
+            
+            polygon_websocket_config: if polygon_api_key.is_some() && env::var("POLYGON_ENABLE_WEBSOCKET").is_ok() {
+                Some(PolygonWebSocketConfig {
+                    enabled: env::var("POLYGON_ENABLE_WEBSOCKET")
+                        .context("POLYGON_ENABLE_WEBSOCKET not set")?
+                        .parse()
+                        .context("POLYGON_ENABLE_WEBSOCKET must be true or false")?,
+                    reconnect_interval_secs: env::var("POLYGON_WEBSOCKET_RECONNECT_INTERVAL")
+                        .context("POLYGON_WEBSOCKET_RECONNECT_INTERVAL not set")?
+                        .parse()
+                        .context("POLYGON_WEBSOCKET_RECONNECT_INTERVAL must be a number")?,
+                    heartbeat_interval_secs: env::var("POLYGON_WEBSOCKET_HEARTBEAT_INTERVAL")
+                        .context("POLYGON_WEBSOCKET_HEARTBEAT_INTERVAL not set")?
+                        .parse()
+                        .context("POLYGON_WEBSOCKET_HEARTBEAT_INTERVAL must be a number")?,
+                    max_subscriptions: env::var("POLYGON_WEBSOCKET_MAX_SUBSCRIPTIONS")
+                        .context("POLYGON_WEBSOCKET_MAX_SUBSCRIPTIONS not set")?
+                        .parse()
+                        .context("POLYGON_WEBSOCKET_MAX_SUBSCRIPTIONS must be a number")?,
+                    buffer_size: env::var("POLYGON_WEBSOCKET_BUFFER_SIZE")
+                        .context("POLYGON_WEBSOCKET_BUFFER_SIZE not set")?
+                        .parse()
+                        .context("POLYGON_WEBSOCKET_BUFFER_SIZE must be a number")?,
+                    default_subscriptions: env::var("POLYGON_DEFAULT_SUBSCRIPTIONS")
+                        .context("POLYGON_DEFAULT_SUBSCRIPTIONS not set")?
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                    auto_subscribe_movers: env::var("POLYGON_AUTO_SUBSCRIBE_MOVERS")
+                        .context("POLYGON_AUTO_SUBSCRIBE_MOVERS not set")?
+                        .parse()
+                        .context("POLYGON_AUTO_SUBSCRIBE_MOVERS must be true or false")?,
+                })
+            } else {
+                None
+            },
             
             lightspeed_config: if env::var("LIGHTSPEED_API_KEY").is_ok() && env::var("LIGHTSPEED_ACCOUNT_ID").is_ok() {
                 Some(LightspeedConfig {

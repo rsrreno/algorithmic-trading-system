@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v8.30.25.1  
-**Last Updated:** 2025-08-30 - **POLYGON API INTEGRATION COMPLETE**: Technical indicators fully implemented with real-time data  
+**Project Version:** v8.28.25.1  
+**Last Updated:** 2025-09-02 - **POLYGON WEBSOCKET INTEGRATION COMPLETE**: Real-time streaming implemented with environment-driven configuration  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview

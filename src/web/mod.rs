@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
 use crate::engine::TradingEngine;
-use crate::data::{SymbolDataResponse, MarketMoverData, DailyBar, MinuteBar};
+use crate::data::{SymbolDataResponse, MarketMoverData, MarketSnapshotTicker, DailyMarketSummaryTicker};
 
 #[derive(Deserialize)]
 struct SymbolRequest {
@@ -99,6 +99,58 @@ struct CacheStatsResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct FullMarketSnapshotResponse {
+    success: bool,
+    count: Option<usize>,
+    data: Option<Vec<MarketSnapshotTicker>>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DailyMarketSummaryResponse {
+    success: bool,
+    count: Option<usize>,
+    date: Option<String>,
+    data: Option<Vec<DailyMarketSummaryTicker>>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DateQuery {
+    date: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SubscribeRequest {
+    symbols: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct WebSocketStatusResponse {
+    success: bool,
+    websocket_enabled: bool,
+    status: Option<String>,
+    url: Option<String>,
+    subscriptions_count: Option<usize>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WebSocketSubscribeResponse {
+    success: bool,
+    status: Option<String>,
+    symbols: Option<Vec<String>>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WebSocketSubscriptionsResponse {
+    success: bool,
+    subscriptions: Option<Vec<String>>,
+    error: Option<String>,
+}
+
 
 pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> Result<()> {
     let app = Router::new()
@@ -113,15 +165,29 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         .route("/api/indicators/rsi/:symbol", get(get_rsi))
         .route("/api/indicators/macd/:symbol", get(get_macd))
         // Market Data
+        .route("/api/snapshot/:symbol", get(get_snapshot))
         .route("/api/market/movers/gainers", get(get_market_gainers))
         .route("/api/market/movers/losers", get(get_market_losers))
         .route("/api/market/status", get(get_market_status))
         .route("/api/market/previous/:symbol", get(get_previous_day))
         .route("/api/market/minute/:symbol", get(get_minute_aggregates))
-        // News & Cache
-        // .route("/api/news", get(get_news)) // TODO: implement news endpoint
+        .route("/api/market/snapshot/full", get(get_full_market_snapshot))
+        .route("/api/market/summary", get(get_daily_market_summary))
+        // Reference Data
+        .route("/api/reference/tickers", get(get_tickers))
+        .route("/api/reference/exchanges", get(get_exchanges))
+        .route("/api/reference/splits/:symbol", get(get_splits))
+        // News & Fundamentals
+        .route("/api/news", get(get_news))
+        .route("/api/financials/:symbol", get(get_financials))
+        // Cache Management
         .route("/api/cache/stats", get(get_cache_stats))
         .route("/api/cache/clean", post(clean_cache))
+        // WebSocket Management
+        .route("/api/websocket/status", get(get_websocket_status))
+        .route("/api/websocket/subscribe", post(websocket_subscribe))
+        .route("/api/websocket/unsubscribe", post(websocket_unsubscribe))
+        .route("/api/websocket/subscriptions", get(get_websocket_subscriptions))
         .with_state(engine);
 
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
@@ -555,6 +621,29 @@ async fn get_macd(
 }
 
 // Market Data Handlers
+async fn get_snapshot(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+) -> Json<SymbolResponse> {
+    tracing::info!("📊 Snapshot request: {}", symbol);
+
+    // Use the daily aggregates as a snapshot (compatible with Stock Starter plan)
+    match engine.lookup_symbol(&symbol).await {
+        Ok(data) => Json(SymbolResponse {
+            success: true,
+            data: Some(data),
+            error: None,
+        }),
+        Err(e) => {
+            tracing::error!("❌ Snapshot failed: {}", e);
+            Json(SymbolResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
 async fn get_market_gainers(
     State(engine): State<Arc<TradingEngine>>,
 ) -> Json<MarketMoversResponse> {
@@ -768,6 +857,350 @@ async fn clean_cache(
                 success: false,
                 entries: None,
                 message: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Reference Data Handlers
+async fn get_tickers(
+    State(engine): State<Arc<TradingEngine>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let limit = params.get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    
+    tracing::info!("📊 All tickers request: limit={}", limit);
+
+    match engine.get_data_module().get_all_tickers(limit).await {
+        Ok(tickers) => {
+            let data = serde_json::to_value(tickers).unwrap_or(serde_json::Value::Null);
+            Json(serde_json::json!({
+                "success": true,
+                "data": data,
+                "error": null
+            }))
+        }
+        Err(e) => {
+            tracing::error!("❌ Tickers request failed: {}", e);
+            Json(serde_json::json!({
+                "success": false,
+                "data": null,
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+async fn get_exchanges(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<serde_json::Value> {
+    tracing::info!("📊 Stock exchanges request");
+
+    match engine.get_data_module().get_exchanges().await {
+        Ok(exchanges) => {
+            let data = serde_json::to_value(exchanges).unwrap_or(serde_json::Value::Null);
+            Json(serde_json::json!({
+                "success": true,
+                "data": data,
+                "error": null
+            }))
+        }
+        Err(e) => {
+            tracing::error!("❌ Exchanges request failed: {}", e);
+            Json(serde_json::json!({
+                "success": false,
+                "data": null,
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+async fn get_splits(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+) -> Json<serde_json::Value> {
+    tracing::info!("📊 Stock splits request: {}", symbol);
+
+    match engine.get_data_module().get_stock_splits(&symbol).await {
+        Ok(splits) => {
+            let data = serde_json::to_value(splits).unwrap_or(serde_json::Value::Null);
+            Json(serde_json::json!({
+                "success": true,
+                "data": data,
+                "error": null
+            }))
+        }
+        Err(e) => {
+            tracing::error!("❌ Stock splits request failed: {}", e);
+            Json(serde_json::json!({
+                "success": false,
+                "data": null,
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+// News & Fundamentals Handlers
+async fn get_news(
+    State(engine): State<Arc<TradingEngine>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<NewsResponse> {
+    let ticker = params.get("ticker").cloned();
+    let limit = params.get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+    
+    tracing::info!("📊 News request: ticker={:?} limit={}", ticker, limit);
+
+    match engine.get_data_module().get_news(ticker.as_deref(), limit).await {
+        Ok(articles) => {
+            let data = serde_json::to_value(articles).unwrap_or(serde_json::Value::Null);
+            Json(NewsResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ News request failed: {}", e);
+            Json(NewsResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+async fn get_financials(
+    State(engine): State<Arc<TradingEngine>>,
+    Path(symbol): Path<String>,
+) -> Json<serde_json::Value> {
+    tracing::info!("📊 Financials request: {}", symbol);
+
+    match engine.get_data_module().get_financials(&symbol).await {
+        Ok(financials) => {
+            let data = serde_json::to_value(financials).unwrap_or(serde_json::Value::Null);
+            Json(serde_json::json!({
+                "success": true,
+                "data": data,
+                "error": null
+            }))
+        }
+        Err(e) => {
+            tracing::error!("❌ Financials request failed: {}", e);
+            Json(serde_json::json!({
+                "success": false,
+                "data": null,
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+// Full Market Snapshot Handler
+async fn get_full_market_snapshot(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<FullMarketSnapshotResponse> {
+    tracing::info!("📊 Full market snapshot request");
+
+    match engine.get_data_module().get_full_market_snapshot_cached().await {
+        Ok(snapshot_data) => {
+            let count = snapshot_data.len();
+            tracing::info!("📊 Full market snapshot returned {} tickers", count);
+            Json(FullMarketSnapshotResponse {
+                success: true,
+                count: Some(count),
+                data: Some(snapshot_data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Full market snapshot failed: {}", e);
+            Json(FullMarketSnapshotResponse {
+                success: false,
+                count: None,
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Daily Market Summary Handler
+async fn get_daily_market_summary(
+    State(engine): State<Arc<TradingEngine>>,
+    Query(query): Query<DateQuery>,
+) -> Json<DailyMarketSummaryResponse> {
+    // Default to yesterday if no date provided
+    let default_date = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::days(1))
+        .unwrap_or_else(chrono::Utc::now)
+        .format("%Y-%m-%d")
+        .to_string();
+    
+    let date = query.date.as_deref().unwrap_or(&default_date);
+    
+    tracing::info!("📊 Daily market summary request for: {}", date);
+
+    match engine.get_data_module().get_daily_market_summary_cached(date).await {
+        Ok(summary_data) => {
+            let count = summary_data.len();
+            tracing::info!("📊 Daily market summary for {} returned {} tickers", date, count);
+            Json(DailyMarketSummaryResponse {
+                success: true,
+                count: Some(count),
+                date: Some(date.to_string()),
+                data: Some(summary_data),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Daily market summary failed: {}", e);
+            Json(DailyMarketSummaryResponse {
+                success: false,
+                count: None,
+                date: Some(date.to_string()),
+                data: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// ===============================
+// WebSocket API Handlers
+// ===============================
+
+// Get WebSocket connection status
+async fn get_websocket_status(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<WebSocketStatusResponse> {
+    tracing::info!("📡 WebSocket status request");
+
+    let data_module = engine.get_data_module();
+    
+    match data_module.websocket_status().await {
+        Some(status) => {
+            let subscriptions = data_module.websocket_subscriptions().await.unwrap_or_default();
+            let subscriptions_count = subscriptions.len();
+            
+            // Determine WebSocket URL based on configuration
+            let ws_url = if engine.get_config().polygon_use_delayed_data {
+                "wss://delayed.polygon.io/stocks".to_string()
+            } else {
+                "wss://socket.polygon.io/stocks".to_string()
+            };
+            
+            Json(WebSocketStatusResponse {
+                success: true,
+                websocket_enabled: true,
+                status: Some(format!("{:?}", status)),
+                url: Some(ws_url),
+                subscriptions_count: Some(subscriptions_count),
+                error: None,
+            })
+        }
+        None => {
+            Json(WebSocketStatusResponse {
+                success: true,
+                websocket_enabled: false,
+                status: Some("disabled".to_string()),
+                url: None,
+                subscriptions_count: Some(0),
+                error: None,
+            })
+        }
+    }
+}
+
+// Subscribe to symbols via WebSocket
+async fn websocket_subscribe(
+    State(engine): State<Arc<TradingEngine>>,
+    Json(payload): Json<SubscribeRequest>,
+) -> Json<WebSocketSubscribeResponse> {
+    tracing::info!("📡 WebSocket subscribe request for {} symbols: {:?}", payload.symbols.len(), payload.symbols);
+
+    let data_module = engine.get_data_module();
+    
+    match data_module.websocket_subscribe(payload.symbols.clone()).await {
+        Ok(_) => {
+            Json(WebSocketSubscribeResponse {
+                success: true,
+                status: Some("subscribed".to_string()),
+                symbols: Some(payload.symbols),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ WebSocket subscription failed: {}", e);
+            Json(WebSocketSubscribeResponse {
+                success: false,
+                status: Some("failed".to_string()),
+                symbols: Some(payload.symbols),
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Unsubscribe from symbols via WebSocket
+async fn websocket_unsubscribe(
+    State(engine): State<Arc<TradingEngine>>,
+    Json(payload): Json<SubscribeRequest>,
+) -> Json<WebSocketSubscribeResponse> {
+    tracing::info!("📡 WebSocket unsubscribe request for {} symbols: {:?}", payload.symbols.len(), payload.symbols);
+
+    let data_module = engine.get_data_module();
+    
+    match data_module.websocket_unsubscribe(payload.symbols.clone()).await {
+        Ok(_) => {
+            Json(WebSocketSubscribeResponse {
+                success: true,
+                status: Some("unsubscribed".to_string()),
+                symbols: Some(payload.symbols),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ WebSocket unsubscription failed: {}", e);
+            Json(WebSocketSubscribeResponse {
+                success: false,
+                status: Some("failed".to_string()),
+                symbols: Some(payload.symbols),
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+// Get current WebSocket subscriptions
+async fn get_websocket_subscriptions(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<WebSocketSubscriptionsResponse> {
+    tracing::info!("📡 WebSocket subscriptions list request");
+
+    let data_module = engine.get_data_module();
+    
+    match data_module.websocket_subscriptions().await {
+        Ok(subscriptions) => {
+            let subscriptions_vec: Vec<String> = subscriptions.into_iter().collect();
+            Json(WebSocketSubscriptionsResponse {
+                success: true,
+                subscriptions: Some(subscriptions_vec),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get WebSocket subscriptions: {}", e);
+            Json(WebSocketSubscriptionsResponse {
+                success: false,
+                subscriptions: None,
                 error: Some(e.to_string()),
             })
         }

@@ -194,17 +194,17 @@ test_endpoint "POST" "/api/order" '{"symbol":"AAPL","side":"INVALID","order_type
 test_endpoint "POST" "/api/order" '{"symbol":"AAPL","side":"BUY","order_type":"LIMIT","quantity":0,"price":150.0}' "Zero quantity order" ""
 test_endpoint "POST" "/api/order" '{}' "Empty order request" ""
 
-# 3. Missing Polygon Endpoints (Per ENDPOINTS.md)
-print_header "3. MISSING POLYGON ENDPOINTS"
-echo -e "${YELLOW}The following endpoints are documented in ENDPOINTS.md but not implemented:${NC}"
+# 3. Polygon API Endpoints
+print_header "3. POLYGON API ENDPOINTS"
+echo -e "${CYAN}Testing Polygon.io integration endpoints:${NC}"
 
-print_subheader "Technical Indicators (Documented as Available)"
+print_subheader "Technical Indicators"
 test_endpoint "GET" "/api/indicators/sma/AAPL?window=50&timespan=day" "" "SMA endpoint" ""
 test_endpoint "GET" "/api/indicators/ema/AAPL?window=50&timespan=day" "" "EMA endpoint" ""
 test_endpoint "GET" "/api/indicators/rsi/AAPL?window=14&timespan=day" "" "RSI endpoint" ""
 test_endpoint "GET" "/api/indicators/macd/AAPL?short_window=12&long_window=26&signal_window=9" "" "MACD endpoint" ""
 
-print_subheader "Market Data & Snapshots (Documented as Working)"
+print_subheader "Market Data & Snapshots"
 test_endpoint "GET" "/api/snapshot/AAPL" "" "Single ticker snapshot" ""
 test_endpoint "GET" "/api/market/movers/gainers" "" "Top market gainers" ""
 test_endpoint "GET" "/api/market/movers/losers" "" "Top market losers" ""
@@ -212,17 +212,17 @@ test_endpoint "GET" "/api/market/status" "" "Market status" ""
 test_endpoint "GET" "/api/market/previous/AAPL" "" "Previous day data" ""
 test_endpoint "GET" "/api/market/minute/AAPL?from=2024-01-01&to=2024-01-02" "" "Minute aggregates" ""
 
-print_subheader "Reference Data (Documented as Tested)"
+print_subheader "Reference Data"
 test_endpoint "GET" "/api/reference/tickers?limit=10" "" "All tickers list" ""
 test_endpoint "GET" "/api/reference/exchanges" "" "Stock exchanges" ""
 test_endpoint "GET" "/api/reference/splits/AAPL" "" "Stock splits" ""
 
-print_subheader "News & Fundamentals (Documented as Working)"
+print_subheader "News & Fundamentals"
 test_endpoint "GET" "/api/news?ticker=AAPL&limit=5" "" "News with sentiment" ""
 test_endpoint "GET" "/api/financials/AAPL" "" "Financial statements" ""
 
-# 4. Additional Missing Features
-print_header "4. ADDITIONAL MISSING FEATURES"
+# 4. Additional Features
+print_header "4. ADDITIONAL FEATURES"
 
 print_subheader "WebSocket Endpoints (Not HTTP)"
 echo -e "${YELLOW}⚠️  WebSocket streaming not testable via HTTP${NC}"
@@ -232,7 +232,14 @@ print_subheader "Cache Management"
 test_endpoint "GET" "/api/cache/stats" "" "Cache statistics" ""
 test_endpoint "POST" "/api/cache/clear" "" "Cache cleanup" ""
 
-print_subheader "Rules Engine (Not Yet Implemented)"
+print_subheader "WebSocket Integration"
+test_endpoint "GET" "/api/websocket/status" "" "WebSocket connection status" ".websocket_enabled"
+test_endpoint "POST" "/api/websocket/subscribe" '{"symbols":["AAPL","TSLA","MSFT"]}' "Subscribe to symbols" ".success"
+test_endpoint "GET" "/api/websocket/subscriptions" "" "Current subscriptions" ".success"
+test_endpoint "POST" "/api/websocket/unsubscribe" '{"symbols":["MSFT"]}' "Unsubscribe from symbols" ".success"
+test_endpoint "POST" "/api/websocket/subscribe" '{"symbols":["GOOGL","AMZN"]}' "Subscribe additional symbols" ".success"
+
+print_subheader "Rules Engine"
 test_endpoint "GET" "/api/rules" "" "Trading rules list" ""
 test_endpoint "POST" "/api/rules" '{"name":"test","conditions":[]}' "Create trading rule" ""
 
@@ -288,28 +295,23 @@ fi
 
 # Implementation Status Report
 print_header "IMPLEMENTATION STATUS REPORT"
-echo -e "${CYAN}Based on ENDPOINTS.md documentation:${NC}"
-echo -e "${GREEN}✅ WORKING:${NC}"
-echo -e "   • Basic system health and status endpoints"
-echo -e "   • Symbol data retrieval (basic Polygon integration)"
-echo -e "   • Order placement (LightSpeed BUY orders)"
-echo -e "   • Error handling for invalid inputs"
+echo -e "${CYAN}Test results summary (status determined by actual test outcomes):${NC}"
 
-echo -e "\n${YELLOW}⚠️  NOT IMPLEMENTED (but documented as available):${NC}"
-echo -e "   • Technical indicators (SMA, EMA, RSI, MACD)"
-echo -e "   • Market snapshots and minute-level data"
-echo -e "   • Market movers and reference data"
-echo -e "   • News and financial statements"
-echo -e "   • WebSocket real-time streaming"
-echo -e "   • Cache management endpoints"
-echo -e "   • Rules engine (completely missing)"
+# Count working endpoints dynamically
+if [ $TESTS_PASSED -gt 0 ]; then
+    echo -e "${GREEN}✅ WORKING ENDPOINTS: $TESTS_PASSED${NC}"
+else
+    echo -e "${YELLOW}⚠️  No endpoints currently working${NC}"
+fi
 
-echo -e "\n${BLUE}📋 NEXT DEVELOPMENT PRIORITIES:${NC}"
-echo -e "   1. Implement Polygon technical indicator endpoints"
-echo -e "   2. Add market data snapshot endpoints"
-echo -e "   3. Build WebSocket streaming for real-time data"
-echo -e "   4. Create rules engine with decision logic"
-echo -e "   5. Add cache management for performance"
+if [ $TESTS_FAILED -gt 0 ]; then
+    echo -e "${RED}❌ FAILED/NOT IMPLEMENTED: $TESTS_FAILED${NC}"
+fi
+
+echo -e "\n${BLUE}📋 DEVELOPMENT STATUS:${NC}"
+echo -e "   • Test results above show actual implementation status"
+echo -e "   • See individual test results for specific endpoint status"
+echo -e "   • Failed tests indicate missing or broken functionality"
 
 echo -e "\n${PURPLE}💡 TO RUN ADDITIONAL TESTS:${NC}"
 echo -e "   • Start system: ${CYAN}docker compose up -d${NC}"

@@ -2,18 +2,20 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::config::Config;
 
 pub mod polygon;
+pub mod websocket;
 mod cache_stats;
 
 pub use cache_stats::CacheStats;
+pub use websocket::{PolygonWebSocket, WebSocketMessage, ConnectionStatus};
 
 pub struct DataModule {
     client: Client,
@@ -24,6 +26,9 @@ pub struct DataModule {
     indicator_cache: Arc<RwLock<HashMap<String, CachedIndicator>>>,
     market_data_cache: Arc<RwLock<HashMap<String, CachedMarketData>>>,
     cache_ttl: Duration,
+    // WebSocket integration for real-time data
+    websocket: Option<PolygonWebSocket>,
+    realtime_cache: Arc<RwLock<HashMap<String, RealtimeTickerData>>>,
 }
 
 /// Cached technical indicator data with timestamp for TTL
@@ -39,11 +44,25 @@ struct CachedIndicator {
 #[derive(Debug, Clone)]
 struct CachedMarketData {
     symbol: String,
-    data_type: String, // "snapshot", "previous_day", "minute_agg"
+    data_type: String, // "snapshot", "previous_day", "minute_agg", "full_market_snapshot", "daily_market_summary"
     timestamp: Instant,
     // Store different data types as needed
     daily_bar: Option<DailyBar>,
     market_movers: Option<Vec<MarketMoverData>>,
+    full_market_snapshot: Option<Vec<MarketSnapshotTicker>>,
+    daily_market_summary: Option<Vec<DailyMarketSummaryTicker>>,
+}
+
+/// Real-time ticker data from WebSocket streams
+#[derive(Debug, Clone)]
+struct RealtimeTickerData {
+    symbol: String,
+    last_price: f64,
+    last_volume: f64,
+    bid: Option<f64>,
+    ask: Option<f64>,
+    last_trade_time: i64,
+    cached_at: Instant,
 }
 
 impl DataModule {
@@ -59,11 +78,31 @@ impl DataModule {
         // All REST API calls use the same base URL - delayed data is indicated by response status
         let base_url = "https://api.polygon.io".to_string();
         
+        // Initialize WebSocket if enabled
+        let websocket = if polygon_enabled && 
+                          config.polygon_websocket_config.as_ref().map(|c| c.enabled).unwrap_or(false) {
+            match PolygonWebSocket::new(config) {
+                Ok(ws) => Some(ws),
+                Err(e) => {
+                    warn!("📡 Failed to initialize WebSocket: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         if polygon_enabled {
             if config.polygon_use_delayed_data {
                 info!("✅ Polygon.io data module enabled with delayed data (15-min delay) and in-memory cache");
             } else {
                 info!("✅ Polygon.io data module enabled with real-time data and in-memory cache");
+            }
+            
+            if websocket.is_some() {
+                info!("📡 WebSocket integration enabled for streaming data");
+            } else {
+                info!("📡 WebSocket integration disabled");
             }
         } else {
             info!("🔧 Polygon.io data module disabled - no API key provided");
@@ -77,6 +116,8 @@ impl DataModule {
             indicator_cache: Arc::new(RwLock::new(HashMap::new())),
             market_data_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_ttl: Duration::from_secs(300), // 5 minutes cache TTL
+            websocket,
+            realtime_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -414,6 +455,149 @@ impl DataModule {
             market_data_entries: market_data_count,
             cache_ttl_seconds: self.cache_ttl.as_secs(),
         })
+    }
+
+    // ===============================
+    // WebSocket Integration Methods
+    // ===============================
+
+    /// Start WebSocket connections and subscribe to default symbols
+    pub async fn start_websocket(&mut self) -> Result<()> {
+        if let Some(ref mut ws) = self.websocket {
+            ws.start().await?;
+            info!("📡 WebSocket started successfully");
+        }
+        Ok(())
+    }
+
+    /// Subscribe to symbols via WebSocket (non-blocking)
+    pub async fn websocket_subscribe(&self, symbols: Vec<String>) -> Result<()> {
+        if let Some(ref ws) = self.websocket {
+            ws.subscribe(symbols).await?;
+        } else {
+            anyhow::bail!("WebSocket not initialized");
+        }
+        Ok(())
+    }
+
+    /// Unsubscribe from symbols via WebSocket (non-blocking)
+    pub async fn websocket_unsubscribe(&self, symbols: Vec<String>) -> Result<()> {
+        if let Some(ref ws) = self.websocket {
+            ws.unsubscribe(symbols).await?;
+        } else {
+            anyhow::bail!("WebSocket not initialized");
+        }
+        Ok(())
+    }
+
+    /// Get WebSocket connection status
+    pub async fn websocket_status(&self) -> Option<ConnectionStatus> {
+        if let Some(ref ws) = self.websocket {
+            Some(ws.get_status().await)
+        } else {
+            None
+        }
+    }
+
+    /// Get current WebSocket subscriptions
+    pub async fn websocket_subscriptions(&self) -> Result<HashSet<String>> {
+        if let Some(ref ws) = self.websocket {
+            Ok(ws.get_subscriptions().await)
+        } else {
+            Ok(HashSet::new())
+        }
+    }
+
+    /// Process WebSocket messages and update real-time cache (called periodically)
+    pub async fn process_websocket_messages(&self) -> Result<()> {
+        if let Some(ref ws) = self.websocket {
+            let messages = ws.get_recent_messages(100).await;
+            
+            for message in messages {
+                self.update_realtime_cache_from_websocket(message).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Update real-time cache from WebSocket message
+    async fn update_realtime_cache_from_websocket(&self, message: WebSocketMessage) -> Result<()> {
+        match message {
+            WebSocketMessage::AggregateMinute { sym, c, v, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                cache.insert(sym.clone(), RealtimeTickerData {
+                    symbol: sym,
+                    last_price: c,
+                    last_volume: v,
+                    bid: None,
+                    ask: None,
+                    last_trade_time: t,
+                    cached_at: Instant::now(),
+                });
+                debug!("📡 Updated real-time cache from aggregate minute data");
+            },
+            WebSocketMessage::Quote { sym, bp, ap, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                if let Some(data) = cache.get_mut(&sym) {
+                    data.bid = Some(bp);
+                    data.ask = Some(ap);
+                    data.cached_at = Instant::now();
+                    debug!("📡 Updated real-time cache from quote data for {}", sym);
+                } else {
+                    // Create new entry if doesn't exist
+                    cache.insert(sym.clone(), RealtimeTickerData {
+                        symbol: sym,
+                        last_price: (bp + ap) / 2.0, // Mid price
+                        last_volume: 0.0,
+                        bid: Some(bp),
+                        ask: Some(ap),
+                        last_trade_time: t,
+                        cached_at: Instant::now(),
+                    });
+                }
+            },
+            WebSocketMessage::Trade { sym, p, s, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                if let Some(data) = cache.get_mut(&sym) {
+                    data.last_price = p;
+                    data.last_volume = s;
+                    data.last_trade_time = t;
+                    data.cached_at = Instant::now();
+                    debug!("📡 Updated real-time cache from trade data for {}", sym);
+                } else {
+                    // Create new entry if doesn't exist
+                    cache.insert(sym.clone(), RealtimeTickerData {
+                        symbol: sym,
+                        last_price: p,
+                        last_volume: s,
+                        bid: None,
+                        ask: None,
+                        last_trade_time: t,
+                        cached_at: Instant::now(),
+                    });
+                }
+            },
+            _ => {} // Handle other message types as needed
+        }
+        Ok(())
+    }
+
+    /// Get real-time data for a symbol (WebSocket cache first, fallback to REST)
+    pub async fn get_realtime_data(&self, symbol: &str) -> Result<Option<RealtimeTickerData>> {
+        // Check real-time cache first
+        {
+            let cache = self.realtime_cache.read().await;
+            if let Some(data) = cache.get(symbol) {
+                // Check if data is fresh (within cache TTL)
+                if data.cached_at.elapsed() < self.cache_ttl {
+                    return Ok(Some(data.clone()));
+                }
+            }
+        }
+        
+        // Fallback to REST API if no WebSocket data available
+        debug!("📡 No fresh real-time data for {}, falling back to REST API", symbol);
+        Ok(None)
     }
 
     /// Get Simple Moving Average (SMA) for a symbol
@@ -770,6 +954,8 @@ impl DataModule {
                 timestamp: Instant::now(),
                 daily_bar: None,
                 market_movers: Some(result.clone()),
+                full_market_snapshot: None,
+                daily_market_summary: None,
             });
         }
         
@@ -881,10 +1067,330 @@ impl DataModule {
                 timestamp: Instant::now(),
                 daily_bar: Some(result.clone()),
                 market_movers: None,
+                full_market_snapshot: None,
+                daily_market_summary: None,
             });
         }
         
         Ok(result)
+    }
+
+    /// Get all US stock tickers from Polygon
+    /// Uses confirmed working Polygon endpoint: /v3/reference/tickers
+    pub async fn get_all_tickers(&self, limit: u32) -> Result<Vec<TickerInfo>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/v3/reference/tickers", self.base_url);
+        
+        let limit_str = limit.to_string();
+        let query_params = vec![
+            ("apikey", self.api_key.as_ref().unwrap().as_str()),
+            ("market", "stocks"),
+            ("active", "true"),
+            ("limit", &limit_str),
+            ("order", "asc"),
+        ];
+
+        debug!("Fetching tickers: {}", url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .context("Failed to fetch tickers")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Tickers request failed: {}", error_text);
+        }
+
+        let api_response: TickersResponse = response
+            .json()
+            .await
+            .context("Failed to parse tickers response")?;
+
+        Ok(api_response.results.unwrap_or_default())
+    }
+
+    /// Get stock exchanges from Polygon
+    /// Uses confirmed working Polygon endpoint: /v3/reference/exchanges
+    pub async fn get_exchanges(&self) -> Result<Vec<ExchangeInfo>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/v3/reference/exchanges", self.base_url);
+        
+        let query_params = vec![
+            ("apikey", self.api_key.as_ref().unwrap().as_str()),
+            ("market", "stocks"),
+            ("asset_class", "stocks"),
+        ];
+
+        debug!("Fetching exchanges: {}", url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .context("Failed to fetch exchanges")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Exchanges request failed: {}", error_text);
+        }
+
+        let api_response: ExchangesResponse = response
+            .json()
+            .await
+            .context("Failed to parse exchanges response")?;
+
+        Ok(api_response.results.unwrap_or_default())
+    }
+
+    /// Get stock splits for a specific ticker from Polygon
+    /// Uses confirmed working Polygon endpoint: /v3/reference/splits
+    pub async fn get_stock_splits(&self, symbol: &str) -> Result<Vec<SplitInfo>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/v3/reference/splits", self.base_url);
+        
+        let query_params = vec![
+            ("apikey", self.api_key.as_ref().unwrap().as_str()),
+            ("ticker", symbol),
+            ("order", "desc"),
+            ("limit", "10"),
+        ];
+
+        debug!("Fetching splits for {}: {}", symbol, url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .context("Failed to fetch stock splits")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Stock splits request failed: {}", error_text);
+        }
+
+        let api_response: SplitsResponse = response
+            .json()
+            .await
+            .context("Failed to parse splits response")?;
+
+        Ok(api_response.results.unwrap_or_default())
+    }
+
+    /// Get full market snapshot for all US stocks
+    /// Uses Polygon endpoint: /v2/snapshot/locale/us/markets/stocks
+    /// NOTE: Returns empty results when markets are closed
+    pub async fn get_full_market_snapshot(&self) -> Result<Vec<MarketSnapshotTicker>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/v2/snapshot/locale/us/markets/stocks", self.base_url);
+
+        debug!("Fetching full market snapshot: {}", url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("apikey", self.api_key.as_ref().unwrap().as_str())])
+            .send()
+            .await
+            .context("Failed to fetch full market snapshot")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Full market snapshot request failed: {}", error_text);
+        }
+
+        let api_response: FullMarketSnapshotResponse = response
+            .json()
+            .await
+            .context("Failed to parse full market snapshot response")?;
+
+        let results = api_response.results.unwrap_or_default();
+        info!("Full market snapshot returned {} tickers", results.len());
+
+        Ok(results)
+    }
+
+    /// Get full market snapshot with caching for performance
+    pub async fn get_full_market_snapshot_cached(&self) -> Result<Vec<MarketSnapshotTicker>> {
+        let cache_key = "full_market_snapshot".to_string();
+        
+        // Check cache first
+        {
+            let cache = self.market_data_cache.read().await;
+            if let Some(cached) = cache.get(&cache_key) {
+                if cached.timestamp.elapsed() < self.cache_ttl {
+                    if let Some(snapshot) = &cached.full_market_snapshot {
+                        debug!("Cache HIT for full market snapshot: {:?}", cached.timestamp.elapsed());
+                        return Ok(snapshot.clone());
+                    }
+                }
+            }
+        }
+        
+        // Cache miss - fetch from API
+        debug!("Cache MISS for full market snapshot - fetching from API");
+        let result = self.get_full_market_snapshot().await?;
+        
+        // Update cache
+        {
+            let mut cache = self.market_data_cache.write().await;
+            cache.insert(cache_key, CachedMarketData {
+                symbol: "*".to_string(), // Global data
+                data_type: "full_market_snapshot".to_string(),
+                timestamp: Instant::now(),
+                daily_bar: None,
+                market_movers: None,
+                full_market_snapshot: Some(result.clone()),
+                daily_market_summary: None,
+            });
+        }
+        
+        Ok(result)
+    }
+
+    /// Get daily market summary (grouped aggregates) for all US stocks for a specific date
+    /// Uses Polygon endpoint: /v2/aggs/grouped/locale/us/market/stocks/{date}
+    /// NOTE: Requires market hours testing for full functionality
+    pub async fn get_daily_market_summary(&self, date: &str) -> Result<Vec<DailyMarketSummaryTicker>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/v2/aggs/grouped/locale/us/market/stocks/{}", self.base_url, date);
+
+        debug!("Fetching daily market summary for {}: {}", date, url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[
+                ("apikey", self.api_key.as_ref().unwrap().as_str()),
+                ("adjusted", "true"),
+            ])
+            .send()
+            .await
+            .context("Failed to fetch daily market summary")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Daily market summary request failed: {}", error_text);
+        }
+
+        let api_response: DailyMarketSummaryResponse = response
+            .json()
+            .await
+            .context("Failed to parse daily market summary response")?;
+
+        // Accept both OK and DELAYED status - DELAYED is expected for Stock Starter plan
+        if api_response.status != "OK" && api_response.status != "DELAYED" {
+            error!("API returned error status: {}", api_response.status);
+            anyhow::bail!("API returned error status: {}", api_response.status);
+        }
+        
+        if api_response.status == "DELAYED" {
+            debug!("Received delayed data for market summary {} (15-minute delay as expected on Stock Starter plan)", date);
+        }
+
+        let results = api_response.results.unwrap_or_default();
+        info!("Daily market summary for {} returned {} tickers", date, results.len());
+
+        Ok(results)
+    }
+
+    /// Get daily market summary with caching for performance
+    pub async fn get_daily_market_summary_cached(&self, date: &str) -> Result<Vec<DailyMarketSummaryTicker>> {
+        let cache_key = format!("daily_market_summary:{}", date);
+        
+        // Check cache first
+        {
+            let cache = self.market_data_cache.read().await;
+            if let Some(cached) = cache.get(&cache_key) {
+                if cached.timestamp.elapsed() < self.cache_ttl {
+                    if let Some(summary) = &cached.daily_market_summary {
+                        debug!("Cache HIT for daily market summary {}: {:?}", date, cached.timestamp.elapsed());
+                        return Ok(summary.clone());
+                    }
+                }
+            }
+        }
+        
+        // Cache miss - fetch from API
+        debug!("Cache MISS for daily market summary {} - fetching from API", date);
+        let result = self.get_daily_market_summary(date).await?;
+        
+        // Update cache
+        {
+            let mut cache = self.market_data_cache.write().await;
+            cache.insert(cache_key, CachedMarketData {
+                symbol: "*".to_string(), // Global data
+                data_type: format!("daily_market_summary:{}", date),
+                timestamp: Instant::now(),
+                daily_bar: None,
+                market_movers: None,
+                full_market_snapshot: None,
+                daily_market_summary: Some(result.clone()),
+            });
+        }
+        
+        Ok(result)
+    }
+
+    /// Get financial statements for a specific ticker from Polygon
+    /// Uses confirmed working Polygon endpoint: /vX/reference/financials
+    pub async fn get_financials(&self, symbol: &str) -> Result<Vec<FinancialData>> {
+        if !self.polygon_enabled {
+            anyhow::bail!("Polygon.io not available - check configuration and API key");
+        }
+
+        let url = format!("{}/vX/reference/financials", self.base_url);
+        
+        let query_params = vec![
+            ("apikey", self.api_key.as_ref().unwrap().as_str()),
+            ("ticker", symbol),
+            ("limit", "4"),
+            ("order", "desc"),
+        ];
+
+        debug!("Fetching financials for {}: {}", symbol, url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .context("Failed to fetch financials")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Financials request failed: {}", error_text);
+        }
+
+        let api_response: FinancialsResponse = response
+            .json()
+            .await
+            .context("Failed to parse financials response")?;
+
+        Ok(api_response.results.unwrap_or_default())
     }
 }
 
@@ -1059,7 +1565,7 @@ pub struct NewsResponse {
     pub results: Option<Vec<NewsArticle>>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NewsArticle {
     pub id: Option<String>,
     pub publisher: Option<NewsPublisher>,
@@ -1074,7 +1580,7 @@ pub struct NewsArticle {
     pub insights: Option<Vec<NewsInsight>>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NewsPublisher {
     pub name: Option<String>,
     pub homepage_url: Option<String>,
@@ -1082,7 +1588,7 @@ pub struct NewsPublisher {
     pub favicon_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NewsInsight {
     pub ticker: Option<String>,
     pub sentiment: Option<String>,
@@ -1231,4 +1737,247 @@ pub struct LastQuote {
     pub bid_size: Option<u64>,
     #[serde(rename = "t")]
     pub timestamp: Option<i64>,
+}
+
+/// Response structure for tickers endpoint
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TickersResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    pub count: Option<u32>,
+    pub next_url: Option<String>,
+    pub results: Option<Vec<TickerInfo>>,
+}
+
+/// Individual ticker information
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TickerInfo {
+    pub ticker: Option<String>,
+    pub name: Option<String>,
+    pub market: Option<String>,
+    pub locale: Option<String>,
+    pub primary_exchange: Option<String>,
+    #[serde(rename = "type")]
+    pub ticker_type: Option<String>,
+    pub active: Option<bool>,
+    pub currency_name: Option<String>,
+    pub cik: Option<String>,
+    pub composite_figi: Option<String>,
+    pub share_class_figi: Option<String>,
+}
+
+/// Response structure for exchanges endpoint
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ExchangesResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    pub count: Option<u32>,
+    pub results: Option<Vec<ExchangeInfo>>,
+}
+
+/// Individual exchange information
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ExchangeInfo {
+    pub acronym: Option<String>,
+    pub asset_class: Option<String>,
+    pub id: Option<i32>,
+    pub locale: Option<String>,
+    pub mic: Option<String>,
+    pub name: Option<String>,
+    pub operating_mic: Option<String>,
+    pub participant_id: Option<String>,
+    #[serde(rename = "type")]
+    pub exchange_type: Option<String>,
+    pub url: Option<String>,
+}
+
+/// Response structure for stock splits endpoint
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SplitsResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    pub count: Option<u32>,
+    pub next_url: Option<String>,
+    pub results: Option<Vec<SplitInfo>>,
+}
+
+/// Individual stock split information
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SplitInfo {
+    pub ticker: Option<String>,
+    pub execution_date: Option<String>,
+    pub split_from: Option<f64>,
+    pub split_to: Option<f64>,
+}
+
+/// Response structure for financials endpoint
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FinancialsResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    pub count: Option<u32>,
+    pub next_url: Option<String>,
+    pub results: Option<Vec<FinancialData>>,
+}
+
+/// Financial statements data
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FinancialData {
+    pub cik: Option<String>,
+    pub company_name: Option<String>,
+    pub ticker: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub filing_date: Option<String>,
+    pub period_of_report_date: Option<String>,
+    pub timeframe: Option<String>, // "annual", "quarterly"
+    pub fiscal_period: Option<String>,
+    pub fiscal_year: Option<String>,
+    pub financials: Option<FinancialStatements>,
+}
+
+/// Financial statements breakdown
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FinancialStatements {
+    pub balance_sheet: Option<serde_json::Value>,
+    pub cash_flow_statement: Option<serde_json::Value>,
+    pub income_statement: Option<serde_json::Value>,
+    pub comprehensive_income: Option<serde_json::Value>,
+}
+
+/// Response structure for full market snapshot endpoint
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FullMarketSnapshotResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    pub count: Option<u32>,
+    pub results: Option<Vec<MarketSnapshotTicker>>,
+}
+
+/// Individual ticker snapshot in full market snapshot
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MarketSnapshotTicker {
+    pub ticker: Option<String>,
+    #[serde(rename = "todaysChange")]
+    pub todays_change: Option<f64>,
+    #[serde(rename = "todaysChangePerc")]
+    pub todays_change_perc: Option<f64>,
+    pub updated: Option<i64>,
+    pub day: Option<MarketSnapshotDayData>,
+    #[serde(rename = "min")]
+    pub minute: Option<MarketSnapshotMinuteData>,
+    #[serde(rename = "prevDay")]
+    pub prev_day: Option<MarketSnapshotDayData>,
+    #[serde(rename = "lastQuote")]
+    pub last_quote: Option<MarketSnapshotLastQuote>,
+    #[serde(rename = "lastTrade")]
+    pub last_trade: Option<MarketSnapshotLastTrade>,
+}
+
+/// Day data for market snapshot ticker
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MarketSnapshotDayData {
+    #[serde(rename = "c")]
+    pub close: Option<f64>,
+    #[serde(rename = "h")]
+    pub high: Option<f64>,
+    #[serde(rename = "l")]
+    pub low: Option<f64>,
+    #[serde(rename = "o")]
+    pub open: Option<f64>,
+    #[serde(rename = "v")]
+    pub volume: Option<f64>,
+    #[serde(rename = "vw")]
+    pub vwap: Option<f64>,
+}
+
+/// Minute data for market snapshot ticker
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MarketSnapshotMinuteData {
+    #[serde(rename = "av")]
+    pub average_volume: Option<f64>,
+    #[serde(rename = "c")]
+    pub close: Option<f64>,
+    #[serde(rename = "h")]
+    pub high: Option<f64>,
+    #[serde(rename = "l")]
+    pub low: Option<f64>,
+    #[serde(rename = "o")]
+    pub open: Option<f64>,
+    #[serde(rename = "t")]
+    pub timestamp: Option<i64>,
+    #[serde(rename = "v")]
+    pub volume: Option<f64>,
+    #[serde(rename = "vw")]
+    pub vwap: Option<f64>,
+}
+
+/// Last quote data for market snapshot ticker
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MarketSnapshotLastQuote {
+    #[serde(rename = "P")]
+    pub ask: Option<f64>,
+    #[serde(rename = "S")]
+    pub ask_size: Option<i64>,
+    #[serde(rename = "p")]
+    pub bid: Option<f64>,
+    #[serde(rename = "s")]
+    pub bid_size: Option<i64>,
+    #[serde(rename = "t")]
+    pub timestamp: Option<i64>,
+}
+
+/// Last trade data for market snapshot ticker
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MarketSnapshotLastTrade {
+    #[serde(rename = "c")]
+    pub conditions: Option<Vec<i32>>,
+    #[serde(rename = "i")]
+    pub id: Option<String>,
+    #[serde(rename = "p")]
+    pub price: Option<f64>,
+    #[serde(rename = "s")]
+    pub sip_timestamp: Option<i64>,
+    #[serde(rename = "t")]
+    pub participant_timestamp: Option<i64>,
+    #[serde(rename = "x")]
+    pub exchange: Option<i32>,
+    #[serde(rename = "z")]
+    pub size: Option<i64>,
+}
+
+/// Response structure for daily market summary (grouped aggregates)
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DailyMarketSummaryResponse {
+    pub status: String,
+    pub request_id: Option<String>,
+    #[serde(rename = "queryCount")]
+    pub query_count: Option<u32>,
+    #[serde(rename = "resultsCount")]
+    pub results_count: Option<u32>,
+    pub adjusted: Option<bool>,
+    pub results: Option<Vec<DailyMarketSummaryTicker>>,
+}
+
+/// Individual ticker summary in daily market summary
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DailyMarketSummaryTicker {
+    #[serde(rename = "T")]
+    pub ticker: Option<String>,
+    #[serde(rename = "c")]
+    pub close: Option<f64>,
+    #[serde(rename = "h")]
+    pub high: Option<f64>,
+    #[serde(rename = "l")]
+    pub low: Option<f64>,
+    #[serde(rename = "o")]
+    pub open: Option<f64>,
+    #[serde(rename = "v")]
+    pub volume: Option<f64>,
+    #[serde(rename = "vw")]
+    pub vwap: Option<f64>,
+    #[serde(rename = "t")]
+    pub timestamp: Option<i64>,
+    #[serde(rename = "n")]
+    pub transactions: Option<u32>,
 }

@@ -38,8 +38,13 @@ impl TradingEngine {
         let max_memory_bytes = config.max_memory_bytes();
         
         // Initialize data module
-        let data_module = DataModule::new(&config)?;
+        let mut data_module = DataModule::new(&config)?;
         info!("✅ Data module initialized");
+        
+        // Start WebSocket connections if enabled
+        if let Err(e) = data_module.start_websocket().await {
+            warn!("⚠️ Failed to start WebSocket: {}", e);
+        }
         
         // Initialize broker module
         let mut broker = BrokerModule::new();
@@ -94,6 +99,11 @@ impl TradingEngine {
                     // TODO: Implement main trading logic
                     if let Err(e) = self.process_market_data().await {
                         error!("Error processing market data: {}", e);
+                    }
+                    
+                    // Process WebSocket messages and update cache
+                    if let Err(e) = self.data_module.process_websocket_messages().await {
+                        debug!("Error processing WebSocket messages: {}", e);
                     }
                     
                     if let Err(e) = self.evaluate_trading_rules().await {
@@ -177,6 +187,10 @@ impl TradingEngine {
     
     pub fn get_data_module(&self) -> &DataModule {
         &self.data_module
+    }
+    
+    pub fn get_config(&self) -> &Config {
+        &self.config
     }
     
     pub async fn shutdown(&self) -> Result<()> {
