@@ -17,6 +17,7 @@ use crate::types::{
 use crate::rules::{ConditionEvaluator, RiskManager, IndicatorCache};
 use crate::data::DataModule;
 use crate::broker::BrokerModule;
+use crate::database::Database;
 
 /// Core rules engine for high-frequency algorithmic trading
 /// Designed for <5ms decision latency with momentum/breakout strategy focus
@@ -35,6 +36,7 @@ pub struct RulesEngine {
     // External Modules
     data_module: Arc<DataModule>,
     broker_module: Arc<tokio::sync::RwLock<BrokerModule>>,
+    database: Arc<Database>,
     
     // Performance Tracking
     decision_count: Arc<RwLock<u64>>,
@@ -49,6 +51,7 @@ impl RulesEngine {
     pub fn new(
         data_module: Arc<DataModule>,
         broker_module: Arc<tokio::sync::RwLock<BrokerModule>>,
+        database: Arc<Database>,
         risk_parameters: RiskParameters,
         initial_cash: f64,
     ) -> Self {
@@ -65,6 +68,7 @@ impl RulesEngine {
             ))),
             data_module,
             broker_module,
+            database,
             decision_count: Arc::new(RwLock::new(0)),
             total_decision_time_micros: Arc::new(RwLock::new(0)),
             enabled: Arc::new(RwLock::new(false)),
@@ -159,7 +163,7 @@ impl RulesEngine {
         };
 
         // Get symbols to evaluate (from rules or existing positions)
-        let symbols = self.get_evaluation_symbols(&active_rules, &portfolio);
+        let symbols = self.get_evaluation_symbols(&active_rules, &portfolio).await;
         
         // Evaluate each symbol against all applicable rules
         for symbol in symbols {
@@ -468,8 +472,8 @@ impl RulesEngine {
         Ok(())
     }
 
-    /// Get symbols that need evaluation (from rules and existing positions)
-    fn get_evaluation_symbols(
+    /// Get symbols that need evaluation (from database watchlist and existing positions)
+    async fn get_evaluation_symbols(
         &self,
         _rules: &[EnhancedTradingRule],
         portfolio: &PortfolioState,
@@ -481,24 +485,46 @@ impl RulesEngine {
             symbols.insert(symbol.clone());
         }
         
-        // For simplicity, we'll evaluate a default set of momentum symbols
-        // LightSpeed certification test symbols - each exhibits specific trading behavior
-        let default_symbols = vec![
-            "GOOGL",   // Immediate fill
-            "AMZN",    // Partial fill
-            "TSLA",    // No fill
-            "MSFT",    // Rejection
-            "CHWY",    // Multiple partial fills
-            "F",       // Multiple partial fills
-            "GE",      // Multiple partial fills
-            "ORCL"     // Cancel testing
-        ];
-        
-        for symbol in default_symbols {
-            symbols.insert(symbol.to_string());
+        // Load active symbols from database watchlist
+        match self.load_active_symbols_from_database().await {
+            Ok(watchlist_symbols) => {
+                for symbol in watchlist_symbols {
+                    symbols.insert(symbol);
+                }
+                debug!("Loaded {} symbols from database watchlist", symbols.len() - portfolio.positions.len());
+            }
+            Err(e) => {
+                warn!("Failed to load symbols from database, using fallback: {}", e);
+                // Fallback to LightSpeed certification test symbols
+                let fallback_symbols = vec![
+                    "GOOGL",   // Immediate fill
+                    "AMZN",    // Partial fill
+                    "TSLA",    // No fill
+                    "MSFT",    // Rejection
+                    "CHWY",    // Multiple partial fills
+                    "F",       // Multiple partial fills
+                    "GE",      // Multiple partial fills
+                    "ORCL"     // Cancel testing
+                ];
+                
+                for symbol in fallback_symbols {
+                    symbols.insert(symbol.to_string());
+                }
+            }
         }
         
         symbols.into_iter().collect()
+    }
+
+    /// Load active symbols from database watchlist
+    async fn load_active_symbols_from_database(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query_as::<_, (String,)>(
+            "SELECT symbol FROM watchlist_symbols WHERE active = 1 ORDER BY symbol"
+        )
+        .fetch_all(&*self.database)
+        .await?;
+
+        Ok(rows.into_iter().map(|(symbol,)| symbol).collect())
     }
 
     /// Log decision for audit trail and analysis

@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::{Config, PolygonWebSocketConfig};
 
+#[derive(Debug)]
 pub struct PolygonWebSocket {
     ws_url: String,
     api_key: String,

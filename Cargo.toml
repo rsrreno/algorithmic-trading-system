@@ -36,6 +36,7 @@ dotenvy = "0.15.7"
 # Logging
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 # Error handling
 anyhow = "1.0.79"

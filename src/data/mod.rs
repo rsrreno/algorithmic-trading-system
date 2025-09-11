@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::{HashMap, HashSet};
+use chrono::Utc;
 
 use crate::config::Config;
 
@@ -17,6 +18,7 @@ mod cache_stats;
 pub use cache_stats::CacheStats;
 pub use websocket::{PolygonWebSocket, WebSocketMessage, ConnectionStatus};
 
+#[derive(Debug)]
 pub struct DataModule {
     client: Client,
     api_key: Option<String>,
@@ -55,7 +57,7 @@ struct CachedMarketData {
 
 /// Real-time ticker data from WebSocket streams
 #[derive(Debug, Clone)]
-struct RealtimeTickerData {
+pub struct RealtimeTickerData {
     symbol: String,
     last_price: f64,
     last_volume: f64,
@@ -63,6 +65,28 @@ struct RealtimeTickerData {
     ask: Option<f64>,
     last_trade_time: i64,
     cached_at: Instant,
+}
+
+impl RealtimeTickerData {
+    pub fn get_current_price(&self) -> f64 {
+        // Use mid-price (bid+ask)/2 if available, otherwise last_price
+        match (self.bid, self.ask) {
+            (Some(bid), Some(ask)) => (bid + ask) / 2.0,
+            _ => self.last_price,
+        }
+    }
+    
+    pub fn last_price(&self) -> f64 {
+        self.last_price
+    }
+    
+    pub fn bid(&self) -> Option<f64> {
+        self.bid
+    }
+    
+    pub fn ask(&self) -> Option<f64> {
+        self.ask
+    }
 }
 
 impl DataModule {
@@ -300,11 +324,22 @@ impl DataModule {
         Ok(())
     }
 
-    /// Test API connection using available endpoints for current plan
+    /// Test API connection using market status endpoint (always available)
     pub async fn test_connection(&self) -> Result<()> {
-        // Test with LightSpeed certification symbol (GOOGL = immediate fill behavior)
-        info!("Testing Polygon.io API connection with GOOGL daily data...");
-        self.get_yesterday_daily_data("GOOGL").await
+        info!("Testing Polygon.io API connection...");
+        match self.get_market_status().await {
+            Ok(status) => {
+                info!("✅ API connection successful - Market is currently: {}", 
+                    status.market.as_deref().unwrap_or("unknown"));
+                if let Some(server_time) = &status.server_time {
+                    info!("📅 Server time: {}", server_time);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                anyhow::bail!("❌ API connection failed: {}", e);
+            }
+        }
     }
 
     // ===============================

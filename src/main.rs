@@ -19,10 +19,25 @@ use engine::TradingEngine;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    // Initialize tracing with file logging
+    let log_dir = std::path::Path::new("/app/logs");
+    let file_appender = tracing_appender::rolling::daily(log_dir, "trading-system.log");
+    let (non_blocking_file, _guard) = tracing_appender::non_blocking(file_appender);
+    
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+    
+    // Create a multi-writer that writes to both stdout and file
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout);
+    let file_layer = fmt::layer().with_writer(non_blocking_file).with_ansi(false);
+    
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
+    
+    // Keep the guard alive for the duration of the program
+    std::mem::forget(_guard);
 
     info!("Starting Algorithmic Trading System v{}", env!("CARGO_PKG_VERSION"));
 
@@ -43,7 +58,7 @@ async fn main() -> Result<()> {
     info!("Metrics server started on {}", config.metrics_address);
 
     // Create trading engine
-    let engine = Arc::new(TradingEngine::new(config.clone()).await?);
+    let engine = Arc::new(TradingEngine::new(config.clone(), Arc::new(db)).await?);
     info!("Trading engine initialized");
 
     // Start the trading engine

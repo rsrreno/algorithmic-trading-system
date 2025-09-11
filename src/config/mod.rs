@@ -10,11 +10,51 @@ pub struct Config {
     pub polygon_use_delayed_data: bool,
     pub polygon_websocket_config: Option<PolygonWebSocketConfig>,
     pub lightspeed_config: Option<LightspeedConfig>,
+    pub paper_trading_config: PaperTradingConfig,
+    pub trading_mode: TradingMode,
     pub max_memory_mb: u64,
     pub bind_address: String,
     pub metrics_address: String,
     pub enable_polygon: bool,
     pub enable_lightspeed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TradingMode {
+    Paper,
+    Live,
+    Simulation,
+}
+
+impl Default for TradingMode {
+    fn default() -> Self {
+        Self::Paper
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaperTradingConfig {
+    pub initial_cash: f64,
+    pub commission_per_share: f64,
+    pub enable_commission: bool,
+    pub session_id: String,
+    pub rules_evaluation_interval_ms: u64,
+    pub default_entry_price_fallback: f64,
+    pub risk_threshold_dollars: f64,
+}
+
+impl Default for PaperTradingConfig {
+    fn default() -> Self {
+        Self {
+            initial_cash: 100000.0,
+            commission_per_share: 0.005,
+            enable_commission: true,
+            session_id: "default-session".to_string(),
+            rules_evaluation_interval_ms: 1000,
+            default_entry_price_fallback: 100.0,
+            risk_threshold_dollars: 1000.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +162,47 @@ impl Config {
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()
                 .unwrap_or(true),
+
+            // Paper Trading Configuration
+            paper_trading_config: PaperTradingConfig {
+                initial_cash: env::var("PAPER_INITIAL_CASH")
+                    .unwrap_or_else(|_| "100000.0".to_string())
+                    .parse()
+                    .unwrap_or(100000.0),
+                commission_per_share: env::var("PAPER_COMMISSION_PER_SHARE")
+                    .unwrap_or_else(|_| "0.005".to_string())
+                    .parse()
+                    .unwrap_or(0.005),
+                enable_commission: env::var("PAPER_ENABLE_COMMISSION")
+                    .unwrap_or_else(|_| "true".to_string())
+                    .parse()
+                    .unwrap_or(true),
+                session_id: env::var("PAPER_SESSION_ID")
+                    .unwrap_or_else(|_| "default-session".to_string()),
+                rules_evaluation_interval_ms: env::var("RULES_EVALUATION_INTERVAL_MS")
+                    .unwrap_or_else(|_| "1000".to_string())
+                    .parse()
+                    .unwrap_or(1000),
+                default_entry_price_fallback: env::var("DEFAULT_ENTRY_PRICE_FALLBACK")
+                    .unwrap_or_else(|_| "100.0".to_string())
+                    .parse()
+                    .unwrap_or(100.0),
+                risk_threshold_dollars: env::var("RISK_THRESHOLD_DOLLARS")
+                    .unwrap_or_else(|_| "1000.0".to_string())
+                    .parse()
+                    .unwrap_or(1000.0),
+            },
+
+            // Trading Mode Configuration
+            trading_mode: match env::var("TRADING_MODE")
+                .unwrap_or_else(|_| "PAPER".to_string())
+                .to_uppercase()
+                .as_str()
+            {
+                "LIVE" => TradingMode::Live,
+                "SIMULATION" => TradingMode::Simulation,
+                _ => TradingMode::Paper, // Default to paper trading
+            },
             
             max_memory_mb: env::var("MAX_MEMORY_MB")
                 .unwrap_or_else(|_| "1024".to_string())

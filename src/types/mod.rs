@@ -18,7 +18,7 @@ pub struct Position {
     pub status: PositionStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum PositionSide {
     Long,
     Short,
@@ -263,18 +263,64 @@ pub struct RiskParameters {
     pub min_volume_ratio: f64, // Minimum volume vs average
 }
 
-impl Default for RiskParameters {
-    fn default() -> Self {
-        Self {
-            max_positions: 5,
-            max_portfolio_exposure_percent: 95.0,
-            max_single_position_percent: 20.0,
-            default_stop_loss_percent: 10.0,
-            max_loss_per_trade_dollars: None,
-            max_daily_loss_dollars: None,
-            require_volume_confirmation: true,
-            min_volume_ratio: 1.5,
-        }
+impl RiskParameters {
+    /// Load risk parameters from database
+    /// This replaces the hardcoded Default implementation
+    pub async fn load_from_database(db: &crate::database::Database) -> anyhow::Result<Self> {
+        let row = sqlx::query_as::<_, (i64, f64, f64, f64, Option<f64>, Option<f64>, i64, f64)>(
+            "SELECT 
+                max_positions,
+                max_portfolio_exposure_percent,
+                max_single_position_percent,
+                default_stop_loss_percent,
+                max_loss_per_trade_dollars,
+                max_daily_loss_dollars,
+                require_volume_confirmation,
+                min_volume_ratio
+            FROM risk_config WHERE id = 1"
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(Self {
+            max_positions: row.0 as u32,
+            max_portfolio_exposure_percent: row.1,
+            max_single_position_percent: row.2,
+            default_stop_loss_percent: row.3,
+            max_loss_per_trade_dollars: row.4,
+            max_daily_loss_dollars: row.5,
+            require_volume_confirmation: row.6 != 0,
+            min_volume_ratio: row.7,
+        })
+    }
+
+    /// Save risk parameters to database
+    pub async fn save_to_database(&self, db: &crate::database::Database) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE risk_config SET
+                max_positions = ?,
+                max_portfolio_exposure_percent = ?,
+                max_single_position_percent = ?,
+                default_stop_loss_percent = ?,
+                max_loss_per_trade_dollars = ?,
+                max_daily_loss_dollars = ?,
+                require_volume_confirmation = ?,
+                min_volume_ratio = ?,
+                updated_at = strftime('%s', 'now')
+            WHERE id = 1"
+        )
+        .bind(self.max_positions)
+        .bind(self.max_portfolio_exposure_percent)
+        .bind(self.max_single_position_percent)
+        .bind(self.default_stop_loss_percent)
+        .bind(self.max_loss_per_trade_dollars)
+        .bind(self.max_daily_loss_dollars)
+        .bind(self.require_volume_confirmation)
+        .bind(self.min_volume_ratio)
+        .execute(db)
+        .await?;
+
+        Ok(())
     }
 }
 

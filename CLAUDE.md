@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v8.28.25.1  
-**Last Updated:** 2025-09-02 - **POLYGON WEBSOCKET INTEGRATION COMPLETE**: Real-time streaming implemented with environment-driven configuration  
+**Project Version:** v9.2.25.1  
+**Last Updated:** 2025-09-11 - **RULES ENGINE INTEGRATION ANALYSIS COMPLETE**: DataModule cloning issue identified, refactoring approach planned  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -17,6 +17,15 @@ High-frequency algorithmic trading system with <5ms latency requirements for mom
 - `docs/DesignQuestions1.pdf` - Performance requirements and trading strategy details
 
 ## Code Style Guide & Standards
+
+### **CRITICAL COMPLETION APPROVAL RULE**
+**NEVER update completion status in documentation files (STATUS.md, README.md, CLAUDE.md, ENDPOINTS.md) without explicit user approval. This includes:**
+- ❌ Marking items as "✅ COMPLETE" or "✅ IMPLEMENTED" in STATUS.md
+- ❌ Claiming functionality is "working" or "verified" in documentation
+- ❌ Moving items from "⏳ In Progress" to "✅ Complete" status in .md files
+- ❌ Updating project phase completion markers without user confirmation
+
+**Session todos can be managed freely, but all .md file status updates require explicit user approval even if compilation succeeds or basic tests pass.**
 
 ### File Header Requirements
 **ALL source files must begin with file path and current branch comments:**
@@ -225,4 +234,4 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `8.28.25.1` | **Development Phase:** Polygon API Integration + Rules Engine Implementation
+**Git Branch:** `9.2.25.1` | **Development Phase:** Rules Engine Integration + DataModule Refactoring

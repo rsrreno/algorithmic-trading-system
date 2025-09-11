@@ -22,6 +22,33 @@ impl RiskManager {
         Self { risk_params }
     }
 
+    /// Create RiskManager with parameters loaded from database
+    /// This replaces hardcoded parameter initialization
+    pub async fn from_database(db: &crate::database::Database) -> Result<Self> {
+        let risk_params = RiskParameters::load_from_database(db).await?;
+        info!("Risk parameters loaded from database: max_positions={}, max_exposure={}%", 
+            risk_params.max_positions, risk_params.max_portfolio_exposure_percent);
+        Ok(Self::new(risk_params))
+    }
+
+    /// Update risk parameters and save to database
+    pub async fn update_risk_parameters(&mut self, new_params: RiskParameters, db: &crate::database::Database) -> Result<()> {
+        // Save to database first
+        new_params.save_to_database(db).await?;
+        
+        // Update in-memory parameters
+        self.risk_params = new_params;
+        
+        info!("Risk parameters updated: max_positions={}, max_exposure={}%", 
+            self.risk_params.max_positions, self.risk_params.max_portfolio_exposure_percent);
+        Ok(())
+    }
+
+    /// Get current risk parameters
+    pub fn get_risk_parameters(&self) -> &RiskParameters {
+        &self.risk_params
+    }
+
     /// Assess risk for a potential trade
     /// Returns risk assessment with position sizing and safety checks
     pub fn assess_trade_risk(
@@ -229,16 +256,6 @@ impl RiskManager {
         available_capital * safe_kelly
     }
 
-    /// Update risk parameters
-    pub fn update_risk_parameters(&mut self, new_params: RiskParameters) {
-        info!("Updating risk parameters");
-        self.risk_params = new_params;
-    }
-
-    /// Get current risk parameters
-    pub fn get_risk_parameters(&self) -> &RiskParameters {
-        &self.risk_params
-    }
 
     /// Check if portfolio is within risk limits
     pub fn validate_portfolio_risk(&self, portfolio: &PortfolioState) -> Result<Vec<String>> {

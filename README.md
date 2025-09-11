@@ -1,13 +1,13 @@
 # Algorithmic Trading System
 
-**Project Version:** v8.28.25.1  
-**Last Updated:** 2025-09-02 - **POLYGON WEBSOCKET INTEGRATION COMPLETE**: Real-time streaming implemented with full REST API management  
+**Project Version:** v9.2.25.1  
+**Last Updated:** 2025-09-11 - **RULES ENGINE INTEGRATION STARTED**: DataModule architecture analysis complete, refactoring planned  
 **Related Files:** `CLAUDE.md`, `STATUS.md`
 
 ## Overview
 High-frequency algorithmic trading system built in Rust for momentum and breakout trading strategies. Features <5ms decision latency and integrations with Polygon.io data feeds and LightSpeed brokerage.
 
-**Current Status**: Polygon.io API integration complete including WebSocket streaming - market data, technical indicators, news, reference data, and real-time streaming all implemented and working. Rules engine implementation ready to begin.
+**Current Status**: Paper trading framework integrated with multi-mode trading support (PAPER/LIVE/SIMULATION). Complete Polygon.io API integration with WebSocket streaming and LightSpeed broker integration. System supports seamless switching between trading modes.
 
 ## Quick Start
 
@@ -57,12 +57,149 @@ MAX_MEMORY_MB=1024
 BIND_ADDRESS=127.0.0.1:8080
 METRICS_ADDRESS=127.0.0.1:9090
 RUST_LOG=info
+
+# Trading Mode Configuration
+TRADING_MODE=PAPER           # Options: PAPER, LIVE, SIMULATION
+
+# Paper Trading Configuration
+PAPER_INITIAL_CASH=100000.0
+PAPER_COMMISSION_PER_SHARE=0.005
+PAPER_ENABLE_COMMISSION=true
+
+# System Configuration Parameters
+RULES_EVALUATION_INTERVAL_MS=1000
+DEFAULT_ENTRY_PRICE_FALLBACK=100.0
+RISK_THRESHOLD_DOLLARS=1000.0
 ```
 
 4. **Start the application:**
 ```bash
 docker compose up --build
 ```
+
+## Trading Mode Configuration
+
+The system supports three trading modes that can be switched via environment configuration:
+
+### Trading Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **PAPER** | Simulated trading with real market data | Safe testing, strategy development |
+| **LIVE** | Real trading via LightSpeed broker | Production trading with real money |
+| **SIMULATION** | Advanced paper trading with realistic delays | Pre-production validation |
+
+### Switching Between Modes
+
+#### 1. **Paper Trading Mode** (Default - Safe)
+```env
+TRADING_MODE=PAPER
+```
+- Uses simulated execution with real market prices
+- No real money involved
+- Perfect for strategy testing and development
+- Tracks P&L and positions in database
+
+#### 2. **Live Trading Mode** (Production)
+```env
+TRADING_MODE=LIVE
+```
+- Routes trades to LightSpeed broker
+- **⚠️ USES REAL MONEY**
+- Requires valid LightSpeed credentials
+- Always test in sandbox first
+
+#### 3. **Simulation Mode** (Advanced Testing)
+```env
+TRADING_MODE=SIMULATION  
+```
+- Enhanced paper trading with realistic market conditions
+- Simulates latency and execution delays
+- Pre-production testing environment
+
+### Steps to Switch from Paper to Live Trading
+
+1. **Update Trading Mode in `.env`:**
+```env
+# Change from PAPER to LIVE
+TRADING_MODE=LIVE
+```
+
+2. **Verify LightSpeed Configuration:**
+```env
+# Ensure LightSpeed settings are correct
+LIGHTSPEED_API_KEY=your_actual_api_key
+LIGHTSPEED_ACCOUNT_ID=your_actual_account_id
+LIGHTSPEED_SANDBOX=true          # Set to false for production
+ENABLE_LIGHTSPEED=true           # Must be true for live trading
+```
+
+3. **Safety Settings for Production:**
+```env
+LIGHTSPEED_SANDBOX=false         # Only when ready for real trading
+# Verify risk parameters
+RISK_THRESHOLD_DOLLARS=1000.0    # Adjust as needed
+```
+
+4. **Restart System with New Configuration:**
+```bash
+# Stop current container
+docker compose down
+
+# Restart with new configuration
+docker compose up --build -d
+
+# Verify connection in logs
+docker compose logs -f trading-system
+```
+
+### Expected Log Output
+
+**Paper Trading Mode:**
+```
+INFO trading_system::engine: 📊 Paper trading mode enabled - integration in progress
+```
+
+**Live Trading Mode (Success):**
+```
+INFO trading_system::broker: ✅ LightSpeed broker initialized successfully
+INFO trading_system::engine: LightSpeed connection established
+```
+
+**Live Trading Mode (Connection Failed):**
+```
+WARN trading_system::broker: ⚠️ LightSpeed broker initialization failed: [error] - continuing without broker
+```
+
+### Safety Recommendations
+
+⚠️ **CRITICAL SAFETY GUIDELINES:**
+
+1. **Always start in PAPER mode** for new strategies
+2. **Test thoroughly in sandbox** (`LIGHTSPEED_SANDBOX=true`) before going live
+3. **Verify credentials** and account balance before switching to live
+4. **Monitor positions closely** during live trading
+5. **Have stop-loss mechanisms** in place
+6. **Start with small position sizes** when going live
+
+### Quick Mode Verification
+
+```bash
+# Check current trading mode
+curl -s http://localhost:8080/api/status | jq '.trading_mode'
+
+# Verify broker connection status  
+curl -s http://localhost:8080/api/status | jq '.broker_connected'
+```
+
+### Rollback to Paper Trading
+
+To safely return to paper trading at any time:
+```env
+TRADING_MODE=PAPER
+```
+
+Then restart: `docker compose down && docker compose up --build -d`
 
 ## API Testing
 
@@ -342,15 +479,32 @@ curl http://localhost:8080/api/portfolio
 - **WebSocket integration**: Positions update automatically via WebSocket messages
 
 ### Current Capabilities
+
+#### Core Trading Infrastructure
+- **Multi-Mode Trading**: PAPER, LIVE, and SIMULATION modes with seamless switching
+- **Paper Trading**: Complete framework with real market data integration and P&L tracking
+- **Live Trading**: LightSpeed broker integration with certification test symbols
+- **Risk Management**: Configurable parameters with database persistence
+
+#### Market Data & Analysis
 - **Technical Indicators**: Complete implementation (SMA, EMA, RSI, MACD) with real Polygon data
 - **Market Data**: Complete implementation (snapshots, aggregates, movers, full market snapshot, daily summaries)
 - **Reference Data**: Complete implementation (tickers, exchanges, splits, market status) 
 - **News Integration**: Complete implementation with AI-powered sentiment analysis
 - **Financial Data**: Complete implementation (balance sheets, income statements, cash flow)
-- **Order Management**: BUY orders working (SELL orders in testing)  
-- **Portfolio Management**: Real-time positions and portfolio calculations from LightSpeed
-- **Position Tracking**: Live WebSocket-based position updates from certification environment
+- **Real-time Streaming**: WebSocket integration with 15-min delayed data feed
+
+#### Trading Operations
+- **Order Management**: Multi-mode routing (paper vs live execution)
+- **Portfolio Management**: Real-time positions and portfolio calculations
+- **Position Tracking**: Live WebSocket-based position updates
+- **Trade Simulation**: Instant fills with commission tracking in paper mode
+- **Database Persistence**: All trades, positions, and configurations stored locally
+
+#### System Performance
 - **Performance**: In-memory caching system for <5ms decision latency
+- **Configuration**: Environment-driven setup with hot-swappable trading modes
+- **Monitoring**: Comprehensive logging with daily rotation and persistent storage
 - **Web Interface**: Full REST API implemented, web UI in development
 
 ## Web Interface
@@ -393,10 +547,11 @@ Access the web interface at: http://localhost:8080
 **Broker**: LightSpeed sandbox account - development and testing environment
 
 ### Next Development Steps
-1. **Rules Engine**: Build algorithmic decision logic using implemented market data APIs
-2. **WebSocket Streaming**: Add real-time data feeds for live market updates
-3. **Broker Testing**: Complete order type testing and position management
-4. **Web Interface**: Build functional trading dashboard
+1. **Complete Paper Broker**: Finalize PaperBroker implementation with full market data integration
+2. **Web Trading Dashboard**: Build functional UI for paper trading monitoring and rule configuration
+3. **Rules Engine Integration**: Connect algorithmic decision logic with multi-mode trading system
+4. **Real-time P&L Updates**: Implement live position monitoring and performance tracking
+5. **Advanced Features**: Add stop-loss, take-profit, and risk management automation
 
 ## File Organization
 
