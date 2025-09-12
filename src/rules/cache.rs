@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::time;
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 
 use crate::types::TechnicalIndicators;
 use crate::data::DataModule;
@@ -107,17 +107,31 @@ impl IndicatorCache {
 
     /// Fetch fresh indicators from data module
     async fn fetch_fresh_indicators(&self, symbol: &str) -> Result<TechnicalIndicators> {
-        // Get current price and volume from snapshot
-        // Note: get_ticker_snapshot returns Result<()>, so we'll use a fallback approach
-        let (price, volume) = match self.data_module.get_symbol_data(symbol).await {
-            Ok(symbol_data) => {
-                let price = symbol_data.close;
-                let volume = symbol_data.volume;
-                (price, volume)
+        // Get current price and volume - try current market price first
+        let (price, volume) = match self.data_module.get_current_market_price(symbol).await {
+            Ok(current_price) => {
+                // Get volume from previous day data since current price doesn't include volume
+                let volume = match self.data_module.get_symbol_data(symbol).await {
+                    Ok(symbol_data) => symbol_data.volume,
+                    Err(_) => 1000000, // Default volume fallback
+                };
+                debug!("Using current market price for {}: ${:.2}", symbol, current_price);
+                (current_price, volume)
             }
             Err(_) => {
-                // Fallback values if snapshot fails
-                (100.0, 1000) // Default reasonable values for testing
+                // Fallback to previous day data
+                match self.data_module.get_symbol_data(symbol).await {
+                    Ok(symbol_data) => {
+                        let price = symbol_data.close;
+                        let volume = symbol_data.volume;
+                        debug!("Using previous day data for {}: ${:.2}", symbol, price);
+                        (price, volume)
+                    }
+                    Err(_) => {
+                        // Final fallback values if both fail
+                        (100.0, 1000) // Default reasonable values for testing
+                    }
+                }
             }
         };
         
@@ -304,7 +318,7 @@ impl IndicatorCache {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
 pub struct CacheStats {
     pub total_symbols: usize,
     pub total_access_count: u64,

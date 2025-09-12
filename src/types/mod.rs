@@ -9,13 +9,111 @@ use std::collections::{VecDeque, HashMap};
 pub struct Position {
     pub id: String,
     pub symbol: String,
-    pub side: PositionSide,
     pub quantity: u64,
-    pub entry_price: f64,
-    pub current_price: f64,
+    pub avg_cost_basis: f64,  // Weighted average cost per share
+    pub total_cost: f64,      // Total dollars invested in position
+    pub current_price: f64,   // Latest market price
+    pub realized_pnl: f64,    // P&L from closed trades
     pub opened_at: DateTime<Utc>,
     pub closed_at: Option<DateTime<Utc>>,
     pub status: PositionStatus,
+    pub session_id: String,
+}
+
+impl Position {
+    /// Create a new position
+    pub fn new(
+        id: String,
+        symbol: String,
+        quantity: u64,
+        price: f64,
+        session_id: String,
+    ) -> Self {
+        Self {
+            id,
+            symbol,
+            quantity,
+            avg_cost_basis: price,
+            total_cost: quantity as f64 * price,
+            current_price: price,
+            realized_pnl: 0.0,
+            opened_at: Utc::now(),
+            closed_at: None,
+            status: PositionStatus::Open,
+            session_id,
+        }
+    }
+
+    /// Calculate weighted average cost basis when adding to existing position
+    pub fn calculate_weighted_average_cost_basis(
+        existing_shares: u64,
+        existing_cost_basis: f64,
+        new_shares: u64,
+        new_price: f64,
+    ) -> f64 {
+        let old_total_cost = existing_shares as f64 * existing_cost_basis;
+        let new_total_cost = new_shares as f64 * new_price;
+        let total_shares = existing_shares + new_shares;
+        
+        let weighted_basis = (old_total_cost + new_total_cost) / total_shares as f64;
+        
+        // Round to 5 decimal places for precision, then to penny for display
+        (weighted_basis * 100000.0).round() / 100000.0
+    }
+
+    /// Add shares to existing position with weighted average cost basis
+    pub fn add_shares(&mut self, quantity: u64, price: f64) {
+        let new_basis = Self::calculate_weighted_average_cost_basis(
+            self.quantity,
+            self.avg_cost_basis,
+            quantity,
+            price,
+        );
+        
+        self.quantity += quantity;
+        self.avg_cost_basis = new_basis;
+        self.total_cost = self.quantity as f64 * self.avg_cost_basis;
+    }
+
+    /// Remove shares from position (for partial/full sales)
+    pub fn remove_shares(&mut self, quantity: u64, sale_price: f64) -> f64 {
+        if quantity > self.quantity {
+            panic!("Cannot remove more shares than held");
+        }
+
+        // Calculate realized P&L for the sold shares
+        let realized_pnl = quantity as f64 * (sale_price - self.avg_cost_basis);
+        
+        self.quantity -= quantity;
+        self.realized_pnl += realized_pnl;
+        
+        // Update total cost for remaining shares (cost basis stays the same)
+        self.total_cost = self.quantity as f64 * self.avg_cost_basis;
+
+        // Close position if no shares remaining
+        if self.quantity == 0 {
+            self.status = PositionStatus::Closed;
+            self.closed_at = Some(Utc::now());
+        }
+
+        realized_pnl
+    }
+
+    /// Calculate current unrealized P&L
+    pub fn calculate_unrealized_pnl(&self) -> f64 {
+        if self.quantity == 0 {
+            0.0
+        } else {
+            let unrealized = (self.current_price - self.avg_cost_basis) * self.quantity as f64;
+            // Round to nearest penny
+            (unrealized * 100.0).round() / 100.0
+        }
+    }
+
+    /// Update current market price
+    pub fn update_current_price(&mut self, price: f64) {
+        self.current_price = price;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -24,11 +122,31 @@ pub enum PositionSide {
     Short,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PositionStatus {
     Open,
     Closed,
-    Closing,
+}
+
+impl std::fmt::Display for PositionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PositionStatus::Open => write!(f, "OPEN"),
+            PositionStatus::Closed => write!(f, "CLOSED"),
+        }
+    }
+}
+
+impl std::str::FromStr for PositionStatus {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "OPEN" => Ok(PositionStatus::Open),
+            "CLOSED" => Ok(PositionStatus::Closed),
+            _ => Err(format!("Invalid position status: {}", s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

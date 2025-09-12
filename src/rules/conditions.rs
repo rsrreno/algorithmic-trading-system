@@ -10,7 +10,7 @@ use crate::types::{TechnicalIndicators, EnhancedTradingRule};
 
 /// High-performance condition evaluator for trading rules
 /// Designed for <1ms evaluation time to meet <5ms decision pipeline requirement
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConditionEvaluator;
 
 #[derive(Debug)]

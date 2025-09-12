@@ -13,6 +13,7 @@ mod rules;
 mod web;
 mod types;
 mod metrics;
+mod market;
 
 use config::Config;
 use engine::TradingEngine;
@@ -58,8 +59,20 @@ async fn main() -> Result<()> {
     info!("Metrics server started on {}", config.metrics_address);
 
     // Create trading engine
-    let engine = Arc::new(TradingEngine::new(config.clone(), Arc::new(db)).await?);
+    let mut engine = TradingEngine::new(config.clone(), Arc::new(db)).await?;
     info!("Trading engine initialized");
+
+    // Start rules engine if enabled in configuration
+    if config.is_rules_engine_enabled() {
+        info!("🚀 Starting rules engine with initial cash: ${:.2}", config.paper_trading_config.initial_cash);
+        if let Err(e) = engine.start_rules_engine(config.paper_trading_config.initial_cash).await {
+            error!("Failed to start rules engine: {}", e);
+        }
+    } else {
+        info!("📊 Rules engine disabled in configuration");
+    }
+    
+    let engine = Arc::new(engine);
 
     // Start the trading engine
     let engine_handle = {

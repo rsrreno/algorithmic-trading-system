@@ -433,28 +433,22 @@ impl LightspeedBroker {
                             crate::types::Position {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 symbol: symbol.to_string(),
-                                side: if pos_qty > 0 { 
-                                    crate::types::PositionSide::Long 
-                                } else { 
-                                    crate::types::PositionSide::Short 
-                                },
                                 quantity: 0,
-                                entry_price: avg_price,
+                                avg_cost_basis: avg_price,
+                                total_cost: 0.0,
                                 current_price: avg_price,
+                                realized_pnl: 0.0,
                                 opened_at: Utc::now(),
                                 closed_at: None,
                                 status: crate::types::PositionStatus::Open,
+                                session_id: "lightspeed-session".to_string(),
                             }
                         });
                         
                         position.quantity = pos_qty.abs() as u64;
-                        position.side = if pos_qty > 0 { 
-                            crate::types::PositionSide::Long 
-                        } else { 
-                            crate::types::PositionSide::Short 
-                        };
+                        // Note: No side field in new Position struct
                         if avg_price > 0.0 {
-                            position.entry_price = avg_price;
+                            position.avg_cost_basis = avg_price;
                             position.current_price = avg_price;
                         }
                         position.status = crate::types::PositionStatus::Open;
@@ -489,28 +483,22 @@ impl LightspeedBroker {
                                 crate::types::Position {
                                     id: uuid::Uuid::new_v4().to_string(),
                                     symbol: symbol.to_string(),
-                                    side: if pos_qty > 0 { 
-                                        crate::types::PositionSide::Long 
-                                    } else { 
-                                        crate::types::PositionSide::Short 
-                                    },
                                     quantity: 0,
-                                    entry_price: avg_price,
+                                    avg_cost_basis: avg_price,
+                                    total_cost: 0.0,
                                     current_price: avg_price,
+                                    realized_pnl: 0.0,
                                     opened_at: Utc::now(),
                                     closed_at: None,
                                     status: crate::types::PositionStatus::Open,
+                                    session_id: "lightspeed-session".to_string(),
                                 }
                             });
                             
                             position.quantity = pos_qty.abs() as u64;
-                            position.side = if pos_qty > 0 { 
-                                crate::types::PositionSide::Long 
-                            } else { 
-                                crate::types::PositionSide::Short 
-                            };
+                            // Note: No side field in new Position struct
                             if avg_price > 0.0 {
-                                position.entry_price = avg_price;
+                                position.avg_cost_basis = avg_price;
                                 position.current_price = avg_price;
                             }
                         }
@@ -595,19 +583,21 @@ impl LightspeedBroker {
         let position = positions_map.entry(symbol.to_string()).or_insert_with(|| Position {
             id: Uuid::new_v4().to_string(),
             symbol: symbol.to_string(),
-            side: PositionSide::Long,
             quantity: 0,
-            entry_price: 0.0,
+            avg_cost_basis: 0.0,
+            total_cost: 0.0,
             current_price: price,
+            realized_pnl: 0.0,
             opened_at: Utc::now(),
             closed_at: None,
             status: PositionStatus::Open,
+            session_id: "lightspeed-session".to_string(),
         });
 
         match side {
             "BUY" => {
                 position.quantity += qty as u64;
-                position.side = PositionSide::Long;
+                // Note: No side field in new Position struct
             }
             "SELL" | "SELL_SHORT" => {
                 if position.quantity >= qty as u64 {
@@ -619,7 +609,7 @@ impl LightspeedBroker {
                 } else {
                     // Going short
                     position.quantity = (qty as u64) - position.quantity;
-                    position.side = PositionSide::Short;
+                    // Note: No side field in new Position struct
                 }
             }
             _ => {}

@@ -237,6 +237,13 @@ struct DeleteSymbolResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct ResetDatabaseResponse {
+    success: bool,
+    message: Option<String>,
+    error: Option<String>,
+}
+
 // Paper Trading API Data Structures
 // #[derive(Serialize)]
 // struct PaperSessionResponse {
@@ -307,6 +314,7 @@ struct ClosePositionResponse {
 pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> Result<()> {
     let app = Router::new()
         .route("/", get(root))
+        .route("/rules", get(rules_page))
         .route("/health", get(health))
         .route("/api/status", get(get_status))
         .route("/api/symbol", post(lookup_symbol))
@@ -337,6 +345,7 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         // Cache Management
         .route("/api/cache/stats", get(get_cache_stats))
         .route("/api/cache/clean", post(clean_cache))
+        .route("/api/reset-database", post(reset_database))
         // WebSocket Management
         .route("/api/websocket/status", get(get_websocket_status))
         .route("/api/websocket/subscribe", post(websocket_subscribe))
@@ -613,6 +622,78 @@ async fn root() -> Html<&'static str> {
             font-size: 0.8rem;
             padding: 0.5rem 1rem;
         }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .status-item {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 6px;
+            border-left: 3px solid #74b9ff;
+        }
+        .status-item .success {
+            color: #00b894;
+            font-weight: bold;
+        }
+        .status-item .error {
+            color: #e17055;
+            font-weight: bold;
+        }
+        .form-section {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #e1e8ed;
+        }
+        .form-section h4 {
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+        .rule-item {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .rule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .rule-status.active {
+            color: #00b894;
+        }
+        .rule-status.inactive {
+            color: #74787e;
+        }
+        .rule-details {
+            font-size: 0.9rem;
+            color: #74787e;
+            margin-bottom: 0.5rem;
+        }
+        .delete-btn {
+            background: #e17055;
+            color: white;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .delete-btn:hover {
+            background: #d63031;
+        }
+        .no-rules {
+            text-align: center;
+            padding: 2rem;
+            color: #74787e;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -623,9 +704,32 @@ async fn root() -> Html<&'static str> {
                 <div class="subtitle">
                     <span class="status-indicator status-online" id="statusDot"></span>
                     <span id="statusText">System Online • Paper Trading Mode</span>
+                    <div style="margin-top: 0.5rem;">
+                        <a href="/" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">📊 Dashboard</a>
+                        <a href="/rules" style="color: white; text-decoration: none; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">🤖 Rules Engine</a>
+                    </div>
                 </div>
             </div>
             <div style="text-align: right; font-size: 0.75rem; opacity: 0.8; line-height: 1.2;">
+                <div style="margin-bottom: 0.5rem;">
+                    <button id="resetDbBtn" style="
+                        background: rgba(255,255,255,0.1); 
+                        border: 1px solid rgba(255,255,255,0.2); 
+                        color: #ff6b6b; 
+                        padding: 0.25rem 0.5rem; 
+                        font-size: 0.7rem; 
+                        border-radius: 4px; 
+                        cursor: pointer;
+                        opacity: 0.7;
+                        transition: opacity 0.2s;
+                    " 
+                    onmouseover="this.style.opacity='1'" 
+                    onmouseout="this.style.opacity='0.7'"
+                    onclick="resetDatabase()" 
+                    title="Reset paper trading database to defaults">
+                        🔄 Reset DB
+                    </button>
+                </div>
                 <div id="systemVersion">v9.2.25.1-945055e</div>
                 <div id="systemClock" style="font-family: monospace; font-weight: bold;">--:--:-- EST</div>
                 <div id="dataDelay" style="font-size: 0.65rem; opacity: 0.7;">15min delayed</div>
@@ -728,10 +832,10 @@ async fn root() -> Html<&'static str> {
                             <thead>
                                 <tr>
                                     <th>Symbol</th>
-                                    <th>Qty</th>
-                                    <th>Avg Price</th>
-                                    <th>Current</th>
-                                    <th>P&L</th>
+                                    <th>Position Size</th>
+                                    <th>Total Cost</th>
+                                    <th>Open P&L</th>
+                                    <th>Realized P&L</th>
                                 </tr>
                             </thead>
                             <tbody id="positionsBody">
@@ -761,6 +865,20 @@ async fn root() -> Html<&'static str> {
             </div>
             <div id="indicatorResults">
                 <div class="loading">Click "Load Indicators" to view technical analysis</div>
+            </div>
+        </div>
+
+        <!-- Rules Engine Quick Access -->
+        <div class="card">
+            <h3>🤖 Rules Engine</h3>
+            <div style="text-align: center; padding: 2rem;">
+                <div style="margin-bottom: 1rem;">
+                    <strong>Automated Trading Rules</strong>
+                    <div style="color: #74787e; font-size: 0.9rem;">Create and manage your trading automation</div>
+                </div>
+                <a href="/rules" style="display: inline-block; background: #74b9ff; color: white; padding: 0.75rem 2rem; border-radius: 6px; text-decoration: none; transition: background 0.3s;">
+                    🚀 Manage Trading Rules
+                </a>
             </div>
         </div>
     </div>
@@ -836,20 +954,107 @@ async fn root() -> Html<&'static str> {
                     body.innerHTML = '';
                     noPositions.style.display = 'none';
                     
-                    Object.entries(data.positions).forEach(([symbol, position]) => {
-                        const row = document.createElement('tr');
-                        const pnl = (position.current_price - position.average_price) * position.quantity;
-                        const pnlClass = pnl >= 0 ? 'color: #00b894' : 'color: #e17055';
+                    let totalOpenPnL = 0;
+                    let totalRealizedPnL = 0;
+
+                    // Group positions by symbol for cumulative P&L calculation
+                    const symbolGroups = {};
+                    Object.entries(data.positions).forEach(([positionId, position]) => {
+                        const symbol = position.symbol;
+                        if (!symbolGroups[symbol]) {
+                            symbolGroups[symbol] = {
+                                openPositions: [],
+                                closedPositions: [],
+                                totalRealizedPnL: 0,
+                                totalQuantity: 0,
+                                totalCost: 0
+                            };
+                        }
                         
+                        // Add realized P&L from this position to symbol total
+                        symbolGroups[symbol].totalRealizedPnL += (position.realized_pnl || 0);
+                        
+                        // Categorize position
+                        const isClosed = position.status === 'CLOSED' || position.quantity === 0;
+                        if (isClosed) {
+                            symbolGroups[symbol].closedPositions.push(position);
+                        } else {
+                            symbolGroups[symbol].openPositions.push(position);
+                            symbolGroups[symbol].totalQuantity += position.quantity;
+                            symbolGroups[symbol].totalCost += (position.total_cost || 0);
+                        }
+                    });
+
+                    // Display one row per symbol with aggregated data
+                    Object.entries(symbolGroups).forEach(([symbol, group]) => {
+                        const row = document.createElement('tr');
+                        
+                        // Calculate Open P&L from open positions only
+                        let openPnL = 0;
+                        let avgCostBasis = 0;
+                        let quantityDisplay = '';
+                        
+                        if (group.openPositions.length > 0) {
+                            // Calculate weighted average cost basis for display
+                            let totalShares = 0;
+                            let totalValue = 0;
+                            let currentPrice = 0;
+                            
+                            group.openPositions.forEach(pos => {
+                                totalShares += pos.quantity;
+                                totalValue += pos.quantity * pos.avg_cost_basis;
+                                currentPrice = pos.current_price; // Use latest price
+                            });
+                            
+                            if (totalShares > 0) {
+                                avgCostBasis = totalValue / totalShares;
+                                openPnL = Math.round((currentPrice - avgCostBasis) * totalShares * 100) / 100;
+                                quantityDisplay = `${totalShares} @ $${avgCostBasis.toFixed(5)}`;
+                            }
+                        } else {
+                            quantityDisplay = 'CLOSED';
+                        }
+                        
+                        // Use cumulative realized P&L for the symbol
+                        const realizedPnL = group.totalRealizedPnL;
+                        
+                        totalOpenPnL += openPnL;
+                        totalRealizedPnL += realizedPnL;
+                        
+                        const openPnLClass = openPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+                        const realizedPnLClass = realizedPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+                        
+                        // Style based on whether symbol has open positions
+                        const isClosed = group.openPositions.length === 0;
+                        const rowStyle = isClosed ? 'opacity: 0.7; font-style: italic;' : '';
+                        
+                        row.style.cssText = rowStyle;
                         row.innerHTML = `
-                            <td>${symbol}</td>
-                            <td>${position.quantity}</td>
-                            <td>${formatCurrency(position.average_price)}</td>
-                            <td>${formatCurrency(position.current_price)}</td>
-                            <td style="${pnlClass}">${formatCurrency(pnl)}</td>
+                            <td>${symbol}${isClosed ? ' (Closed Today)' : ''}</td>
+                            <td>${quantityDisplay}</td>
+                            <td>${formatCurrency(group.totalCost || 0)}</td>
+                            <td style="${openPnLClass}">${formatCurrency(openPnL)}</td>
+                            <td style="${realizedPnLClass}">${formatCurrency(realizedPnL)}</td>
                         `;
                         body.appendChild(row);
                     });
+
+                    // Add totals row like in reference image
+                    const totalsRow = document.createElement('tr');
+                    totalsRow.style.borderTop = '2px solid #74787e';
+                    totalsRow.style.fontWeight = 'bold';
+                    
+                    const totalOpenClass = totalOpenPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+                    const totalRealizedClass = totalRealizedPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+                    
+                    totalsRow.innerHTML = `
+                        <td><strong>All</strong></td>
+                        <td><strong>0</strong></td>
+                        <td></td>
+                        <td style="${totalOpenClass}"><strong>${formatCurrency(totalOpenPnL)}</strong></td>
+                        <td style="${totalRealizedClass}"><strong>${formatCurrency(totalRealizedPnL)}</strong></td>
+                    `;
+                    body.appendChild(totalsRow);
                 } else {
                     body.innerHTML = '';
                     noPositions.style.display = 'block';
@@ -1114,6 +1319,609 @@ async fn root() -> Html<&'static str> {
                 style: 'currency',
                 currency: 'USD'
             }).format(value);
+        }
+
+        // Database reset function
+        async function resetDatabase() {
+            const confirmed = confirm(
+                "⚠️ WARNING: This will permanently delete ALL paper trading data!\n\n" +
+                "This includes:\n" +
+                "• All open and closed positions\n" +
+                "• All trade history and transactions\n" +
+                "• Portfolio balances and P&L history\n" +
+                "• Trading rules configuration\n" +
+                "• Session data and statistics\n\n" +
+                "This action CANNOT be undone.\n\n" +
+                "Are you absolutely sure you want to reset the database?"
+            );
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/reset-database', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert("✅ Database has been reset successfully!\n\nRefreshing dashboard...");
+                    // Refresh the page to show clean data
+                    window.location.reload();
+                } else {
+                    alert("❌ Database reset failed: " + (result.error || "Unknown error"));
+                }
+            } catch (error) {
+                alert("❌ Error communicating with server: " + error.message);
+            }
+        }
+
+        // Initialize dashboard
+        window.onload = function() {
+            refreshPortfolio();
+            loadPositions();
+            loadWatchlist();
+            loadMarketStatus();
+            loadSystemVersion();
+            
+            refreshInterval = setInterval(() => {
+                refreshPortfolio();
+                loadPositions();
+            }, 30000); // Refresh every 30 seconds
+        };
+    </script>
+</body>
+</html>"#)
+}
+
+// Rules Engine Management Page
+async fn rules_page() -> Html<&'static str> {
+    Html(r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>🤖 Rules Engine Management</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #f5f7fa; 
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        .header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 1rem 2rem; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { 
+            font-size: 1.8rem; 
+            margin-bottom: 0.5rem; 
+        }
+        .header .subtitle { 
+            opacity: 0.9; 
+            font-size: 0.9rem; 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.1);
+            transition: background 0.3s;
+        }
+        .nav-links a:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 2rem auto; 
+            padding: 0 2rem;
+            display: grid;
+            gap: 2rem;
+        }
+        .card { 
+            background: white; 
+            border-radius: 12px; 
+            padding: 1.5rem; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border: 1px solid #e1e8ed;
+        }
+        .card h3 { 
+            color: #2c3e50; 
+            margin-bottom: 1rem; 
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #ecf0f1;
+            font-size: 1.1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .status-item {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 4px solid #74b9ff;
+            text-align: center;
+        }
+        .status-item .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .status-item .success { color: #00b894; }
+        .status-item .error { color: #e17055; }
+        .form-section {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid #e1e8ed;
+            margin-bottom: 2rem;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+        .form-group input,
+        .form-group select {
+            padding: 0.75rem;
+            border: 2px solid #e1e8ed;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #74b9ff;
+        }
+        button {
+            background: #74b9ff;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-right: 0.5rem;
+        }
+        button:hover {
+            background: #0984e3;
+        }
+        button.success {
+            background: #00b894;
+        }
+        button.success:hover {
+            background: #00a085;
+        }
+        button.secondary {
+            background: #74787e;
+        }
+        button.secondary:hover {
+            background: #636e72;
+        }
+        button.danger {
+            background: #e17055;
+        }
+        button.danger:hover {
+            background: #d63031;
+        }
+        .rule-item {
+            background: white;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: box-shadow 0.3s;
+        }
+        .rule-item:hover {
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .rule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .rule-name {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .rule-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .rule-status.active {
+            background: #d1f2eb;
+            color: #00b894;
+        }
+        .rule-status.inactive {
+            background: #f8f9fa;
+            color: #74787e;
+        }
+        .rule-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+            color: #74787e;
+        }
+        .rule-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+        .rule-actions button {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+        }
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #74787e;
+        }
+        .no-rules {
+            text-align: center;
+            padding: 3rem;
+            color: #74787e;
+            font-style: italic;
+        }
+        .alert {
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+        .alert.success {
+            background: #d1f2eb;
+            color: #00b894;
+            border-left: 4px solid #00b894;
+        }
+        .alert.error {
+            background: #ffeaa7;
+            color: #e17055;
+            border-left: 4px solid #e17055;
+        }
+        @media (max-width: 768px) {
+            .container { padding: 0 1rem; }
+            .form-grid { grid-template-columns: 1fr; }
+            .nav-links { flex-direction: column; gap: 0.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>🤖 Rules Engine Management</h1>
+            <div class="subtitle">
+                <span>Create and manage your automated trading rules</span>
+                <div class="nav-links">
+                    <a href="/">📊 Dashboard</a>
+                    <a href="/rules">🤖 Rules</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Rules Engine Status -->
+        <div class="card">
+            <h3>⚡ Engine Status
+                <button class="secondary" onclick="refreshStatus()">Refresh</button>
+            </h3>
+            <div id="engineStatus">
+                <div class="loading">Loading engine status...</div>
+            </div>
+        </div>
+
+        <!-- Create New Rule -->
+        <div class="card">
+            <h3>➕ Create New Trading Rule</h3>
+            <div id="alerts"></div>
+            <form class="form-section" onsubmit="createRule(event)">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="ruleName">Rule Name*</label>
+                        <input type="text" id="ruleName" required placeholder="e.g., NVDA Momentum Breakout">
+                    </div>
+                    <div class="form-group">
+                        <label for="ruleStrategy">Strategy*</label>
+                        <select id="ruleStrategy" required>
+                            <option value="">Select Strategy</option>
+                            <option value="momentum_breakout">Momentum Breakout</option>
+                            <option value="mean_reversion">Mean Reversion</option>
+                            <option value="volume_spike">Volume Spike</option>
+                            <option value="rsi_oversold">RSI Oversold</option>
+                            <option value="moving_average_cross">Moving Average Crossover</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="positionSize">Position Size (%)*</label>
+                        <input type="number" id="positionSize" value="5.0" min="0.1" max="25.0" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="stopLoss">Stop Loss (%)</label>
+                        <input type="number" id="stopLoss" value="3.0" min="0.1" max="20.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="takeProfit">Take Profit (%)</label>
+                        <input type="number" id="takeProfit" value="10.0" min="0.1" max="50.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="ruleActive">Rule Active</label>
+                        <select id="ruleActive">
+                            <option value="true">Active</option>
+                            <option value="false">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="success">Create Trading Rule</button>
+                <button type="button" class="secondary" onclick="clearForm()">Clear Form</button>
+            </form>
+        </div>
+
+        <!-- Active Rules List -->
+        <div class="card">
+            <h3>📋 Active Trading Rules
+                <button class="secondary" onclick="loadRules()">Refresh</button>
+            </h3>
+            <div id="rulesList">
+                <div class="loading">Loading rules...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        // Initialize page
+        window.onload = function() {
+            refreshStatus();
+            loadRules();
+            
+            // Set up auto-refresh
+            refreshInterval = setInterval(() => {
+                refreshStatus();
+                loadRules();
+            }, 30000); // Refresh every 30 seconds
+        };
+
+        // Load engine status
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/api/rules/engine/status');
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('engineStatus');
+                
+                if (data.success) {
+                    statusDiv.innerHTML = `
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <div class="value ${data.running ? 'success' : 'error'}">
+                                    ${data.running ? '🟢 RUNNING' : '🔴 STOPPED'}
+                                </div>
+                                <div>Engine Status</div>
+                            </div>
+                            <div class="status-item">
+                                <div class="value">${data.total_rules || 0}</div>
+                                <div>Total Rules</div>
+                            </div>
+                            <div class="status-item">
+                                <div class="value success">${data.active_rules || 0}</div>
+                                <div>Active Rules</div>
+                            </div>
+                            <div class="status-item">
+                                <div class="value">$100,000</div>
+                                <div>Available Capital</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    statusDiv.innerHTML = '<div class="alert error">Failed to load engine status</div>';
+                }
+            } catch (error) {
+                console.error('Error loading status:', error);
+                document.getElementById('engineStatus').innerHTML = 
+                    '<div class="alert error">Error connecting to rules engine</div>';
+            }
+        }
+
+        // Load rules list
+        async function loadRules() {
+            try {
+                const response = await fetch('/api/rules');
+                const data = await response.json();
+                
+                const rulesList = document.getElementById('rulesList');
+                
+                if (data.success && data.rules && data.rules.length > 0) {
+                    rulesList.innerHTML = data.rules.map(rule => `
+                        <div class="rule-item">
+                            <div class="rule-header">
+                                <div class="rule-name">${rule.name}</div>
+                                <div class="rule-status ${rule.active ? 'active' : 'inactive'}">
+                                    ${rule.active ? 'ACTIVE' : 'INACTIVE'}
+                                </div>
+                            </div>
+                            <div class="rule-details">
+                                <div><strong>Strategy:</strong> ${rule.strategy}</div>
+                                <div><strong>Position:</strong> ${rule.position_size_percent}%</div>
+                                <div><strong>Stop Loss:</strong> ${rule.stop_loss_percent || 'N/A'}%</div>
+                                <div><strong>Take Profit:</strong> ${rule.take_profit_percent || 'N/A'}%</div>
+                            </div>
+                            <div class="rule-actions">
+                                <button onclick="toggleRule('${rule.id}', ${!rule.active})" class="secondary">
+                                    ${rule.active ? 'Deactivate' : 'Activate'}
+                                </button>
+                                <button onclick="deleteRule('${rule.id}')" class="danger">Delete</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    rulesList.innerHTML = `
+                        <div class="no-rules">
+                            <h4>No trading rules created yet</h4>
+                            <p>Create your first automated trading rule using the form above.</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading rules:', error);
+                document.getElementById('rulesList').innerHTML = 
+                    '<div class="alert error">Error loading rules list</div>';
+            }
+        }
+
+        // Create new rule
+        async function createRule(event) {
+            event.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('ruleName').value,
+                strategy: document.getElementById('ruleStrategy').value,
+                position_size_percent: parseFloat(document.getElementById('positionSize').value),
+                stop_loss_percent: parseFloat(document.getElementById('stopLoss').value) || null,
+                take_profit_percent: parseFloat(document.getElementById('takeProfit').value) || null,
+                active: document.getElementById('ruleActive').value === 'true',
+                description: `${document.getElementById('ruleStrategy').value} rule created via web interface`
+            };
+            
+            try {
+                const response = await fetch('/api/rules', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('✅ Rule created successfully!', 'success');
+                    clearForm();
+                    loadRules();
+                    refreshStatus();
+                } else {
+                    showAlert(`❌ Failed to create rule: ${result.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error creating rule:', error);
+                showAlert('❌ Network error creating rule', 'error');
+            }
+        }
+
+        // Delete rule
+        async function deleteRule(ruleId) {
+            if (!confirm('Are you sure you want to delete this rule?')) return;
+            
+            try {
+                const response = await fetch(`/api/rules/${ruleId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('✅ Rule deleted successfully!', 'success');
+                    loadRules();
+                    refreshStatus();
+                } else {
+                    showAlert(`❌ Failed to delete rule: ${result.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting rule:', error);
+                showAlert('❌ Network error deleting rule', 'error');
+            }
+        }
+
+        // Toggle rule active status
+        async function toggleRule(ruleId, newStatus) {
+            try {
+                const response = await fetch(`/api/rules/${ruleId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        active: newStatus
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(`✅ Rule ${newStatus ? 'activated' : 'deactivated'} successfully!`, 'success');
+                    loadRules();
+                    refreshStatus();
+                } else {
+                    showAlert(`❌ Failed to toggle rule: ${result.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error toggling rule:', error);
+                showAlert('❌ Network error toggling rule', 'error');
+            }
+        }
+
+        // Clear form
+        function clearForm() {
+            document.getElementById('ruleName').value = '';
+            document.getElementById('ruleStrategy').value = '';
+            document.getElementById('positionSize').value = '5.0';
+            document.getElementById('stopLoss').value = '3.0';
+            document.getElementById('takeProfit').value = '10.0';
+            document.getElementById('ruleActive').value = 'true';
+        }
+
+        // Show alert
+        function showAlert(message, type) {
+            const alertsDiv = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert ${type}`;
+            alert.textContent = message;
+            
+            alertsDiv.innerHTML = '';
+            alertsDiv.appendChild(alert);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
         }
     </script>
 </body>
@@ -1474,8 +2282,8 @@ async fn get_snapshot(
 ) -> Json<SymbolResponse> {
     tracing::info!("📊 Snapshot request: {}", symbol);
 
-    // Use the daily aggregates as a snapshot (compatible with Stock Starter plan)
-    match engine.lookup_symbol(&symbol).await {
+    // Use current market data with snapshot API for real-time pricing
+    match engine.get_current_symbol_data(&symbol).await {
         Ok(data) => Json(SymbolResponse {
             success: true,
             data: Some(data),
@@ -2122,45 +2930,201 @@ async fn get_portfolio(State(engine): State<Arc<TradingEngine>>) -> Json<Portfol
     
     let broker_module = engine.get_broker_module().await;
     
-    match broker_module.get_positions().await {
-        Ok(positions) => {
-            // Calculate portfolio summary
-            let mut total_value = 0.0;
-            let mut total_exposure = 0.0;
-            
-            for position in positions.values() {
-                let position_value = position.current_price * position.quantity as f64;
-                total_value += position_value;
-                total_exposure += position_value;
-            }
-            
-            // For now, use a default cash value - in production this would come from broker
-            let available_cash = 50000.0 - total_exposure; // Assume $50k account
-            
+    // Get real portfolio data from paper broker with actual position values
+    match broker_module.get_portfolio_snapshot().await {
+        Ok(portfolio_state) => {
+            // Use real portfolio data from paper broker
             let portfolio_summary = PortfolioSummary {
-                total_value: available_cash + total_value,
-                available_cash,
-                total_exposure,
-                position_count: positions.len(),
-                positions: positions.clone(),
-                last_updated: chrono::Utc::now().to_rfc3339(),
+                total_value: portfolio_state.total_value,
+                available_cash: portfolio_state.available_cash,
+                total_exposure: portfolio_state.total_exposure,
+                position_count: portfolio_state.current_position_count as usize,
+                positions: portfolio_state.positions,
+                last_updated: portfolio_state.last_updated.to_rfc3339(),
             };
             
-            tracing::info!("✅ Portfolio calculated: ${:.2} total, {} positions", 
-                portfolio_summary.total_value, portfolio_summary.position_count);
+            tracing::info!("✅ Portfolio from paper broker: ${:.2} total, ${:.2} cash, {} positions", 
+                portfolio_summary.total_value, portfolio_summary.available_cash, portfolio_summary.position_count);
             
             Json(PortfolioResponse {
                 success: true,
                 portfolio: Some(portfolio_summary),
                 error: None,
             })
+        },
+        Err(_) => {
+            // Fallback to broker positions if rules engine unavailable
+            match broker_module.get_positions().await {
+                Ok(positions) => {
+                    // Calculate portfolio summary from broker positions
+                    let mut position_value = 0.0;
+                    let mut total_exposure = 0.0;
+                    
+                    for position in positions.values() {
+                        let value = position.current_price * position.quantity as f64;
+                        position_value += value;
+                        total_exposure += value;
+                    }
+                    
+                    // Default fallback values when portfolio state unavailable
+                    let available_cash = 100000.0 - total_exposure; // Use $100k as documented in paper_sessions
+                    
+                    let portfolio_summary = PortfolioSummary {
+                        total_value: available_cash + position_value,
+                        available_cash,
+                        total_exposure,
+                        position_count: positions.len(),
+                        positions: positions.clone(),
+                        last_updated: chrono::Utc::now().to_rfc3339(),
+                    };
+            
+            tracing::info!("✅ Portfolio calculated from broker: ${:.2} total, {} positions", 
+                portfolio_summary.total_value, portfolio_summary.position_count);
+                
+            Json(PortfolioResponse {
+                success: true,
+                portfolio: Some(portfolio_summary),
+                error: None,
+            })
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to get broker positions: {}", e);
+                    Json(PortfolioResponse {
+                        success: false,
+                        portfolio: None,
+                        error: Some(e.to_string()),
+                    })
+                }
+            }
+        }
+    }
+}
+
+// =====================================
+// Database Reset Management
+// =====================================
+
+async fn reset_database(
+    State(engine): State<Arc<TradingEngine>>,
+) -> Json<ResetDatabaseResponse> {
+    tracing::warn!("⚠️ Database reset request received");
+    
+    // Get paper trading config values from engine
+    let config = engine.get_config();
+    let initial_cash = config.paper_trading_config.initial_cash;
+    let session_id = &config.paper_trading_config.session_id;
+    
+    match engine.get_database().await {
+        Ok(db) => {
+            tracing::info!("🔄 Starting database reset process...");
+            
+            // Begin transaction for safe reset
+            let mut tx = match db.begin().await {
+                Ok(transaction) => transaction,
+                Err(e) => {
+                    tracing::error!("❌ Failed to begin transaction: {}", e);
+                    return Json(ResetDatabaseResponse {
+                        success: false,
+                        message: None,
+                        error: Some(format!("Transaction failed: {}", e)),
+                    });
+                }
+            };
+            
+            // Reset all paper trading tables using config values
+            let delete_trades = "DELETE FROM paper_trades";
+            let delete_positions = "DELETE FROM positions";
+            let delete_rules = "DELETE FROM trading_rules_config";
+            let delete_snapshots = "DELETE FROM paper_portfolio_snapshots";
+            
+            let update_session = format!(
+                "UPDATE paper_sessions SET 
+                    current_cash = {},
+                    total_pnl = 0.0,
+                    realized_pnl = 0.0,
+                    unrealized_pnl = 0.0,
+                    open_positions = 0,
+                    total_trades = 0,
+                    winning_trades = 0,
+                    losing_trades = 0,
+                    commission_paid = 0.0,
+                    max_drawdown = 0.0,
+                    updated_at = strftime('%s', 'now'),
+                    status = 'ACTIVE'
+                    WHERE id = '{}'",
+                initial_cash, session_id
+            );
+            
+            let insert_session = format!(
+                "INSERT OR IGNORE INTO paper_sessions (
+                    id, name, description, initial_cash, current_cash
+                ) VALUES (
+                    '{}', 'Default Paper Trading Session', 
+                    'Default session created for immediate paper trading testing',
+                    {}, {}
+                )",
+                session_id, initial_cash, initial_cash
+            );
+            
+            let reset_queries = [
+                delete_trades,
+                delete_positions,
+                delete_rules,
+                delete_snapshots,
+                update_session.as_str(),
+                insert_session.as_str(),
+            ];
+            
+            for query in &reset_queries {
+                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
+                    tracing::error!("❌ Database reset query failed: {}", e);
+                    if let Err(rollback_err) = tx.rollback().await {
+                        tracing::error!("❌ Failed to rollback transaction: {}", rollback_err);
+                    }
+                    return Json(ResetDatabaseResponse {
+                        success: false,
+                        message: None,
+                        error: Some(format!("Reset query failed: {}", e)),
+                    });
+                }
+            }
+            
+            // Commit the transaction
+            match tx.commit().await {
+                Ok(_) => {
+                    tracing::info!("✅ Database reset completed successfully");
+                    
+                    // Refresh the paper broker's position cache
+                    tracing::info!("🔄 Refreshing paper broker position cache...");
+                    if let Err(e) = engine.refresh_paper_broker_cache().await {
+                        tracing::warn!("⚠️ Failed to refresh paper broker cache: {}", e);
+                        // Don't fail the reset for this - it's not critical
+                    } else {
+                        tracing::info!("✅ Paper broker cache refreshed");
+                    }
+                    
+                    Json(ResetDatabaseResponse {
+                        success: true,
+                        message: Some("Database has been reset to default state with $100,000 starting cash".to_string()),
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to commit database reset: {}", e);
+                    Json(ResetDatabaseResponse {
+                        success: false,
+                        message: None,
+                        error: Some(format!("Commit failed: {}", e)),
+                    })
+                }
+            }
         }
         Err(e) => {
-            tracing::error!("❌ Failed to get portfolio: {}", e);
-            Json(PortfolioResponse {
+            tracing::error!("❌ Failed to get database connection for reset: {}", e);
+            Json(ResetDatabaseResponse {
                 success: false,
-                portfolio: None,
-                error: Some(e.to_string()),
+                message: None,
+                error: Some(format!("Database connection failed: {}", e)),
             })
         }
     }

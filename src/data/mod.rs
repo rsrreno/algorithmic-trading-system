@@ -1,4 +1,6 @@
 // src/data/mod.rs
+// Branch: 9.2.25.1
+
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -7,9 +9,10 @@ use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::{HashMap, HashSet};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use crate::config::Config;
+use crate::market::{MarketSchedule, DataSourceStrategy};
 
 pub mod polygon;
 pub mod websocket;
@@ -18,7 +21,173 @@ mod cache_stats;
 pub use cache_stats::CacheStats;
 pub use websocket::{PolygonWebSocket, WebSocketMessage, ConnectionStatus};
 
+/// Shareable WebSocket service for DataModule
+/// This separates the WebSocket handling from DataModule to enable Arc sharing
 #[derive(Debug)]
+pub struct WebSocketService {
+    websocket: Option<Arc<RwLock<PolygonWebSocket>>>,
+    realtime_cache: Arc<RwLock<HashMap<String, RealtimeTickerData>>>,
+}
+
+impl WebSocketService {
+    pub fn new(config: &Config) -> Self {
+        let websocket = if config.is_polygon_enabled() && 
+                          config.polygon_websocket_config.as_ref().map(|c| c.enabled).unwrap_or(false) {
+            match PolygonWebSocket::new(config) {
+                Ok(ws) => Some(Arc::new(RwLock::new(ws))),
+                Err(e) => {
+                    warn!("📡 Failed to initialize WebSocket: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Self {
+            websocket,
+            realtime_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn start_websocket(&self) -> Result<()> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let mut ws_guard = ws.write().await;
+            ws_guard.start().await?;
+            info!("📡 WebSocket started successfully");
+        }
+        Ok(())
+    }
+
+    pub async fn websocket_subscribe(&self, symbols: Vec<String>) -> Result<()> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let ws_guard = ws.read().await;
+            ws_guard.subscribe(symbols).await?;
+        } else {
+            anyhow::bail!("WebSocket not initialized");
+        }
+        Ok(())
+    }
+
+    pub async fn websocket_unsubscribe(&self, symbols: Vec<String>) -> Result<()> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let ws_guard = ws.read().await;
+            ws_guard.unsubscribe(symbols).await?;
+        } else {
+            anyhow::bail!("WebSocket not initialized");
+        }
+        Ok(())
+    }
+
+    pub async fn websocket_status(&self) -> Option<ConnectionStatus> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let ws_guard = ws.read().await;
+            Some(ws_guard.get_status().await)
+        } else {
+            None
+        }
+    }
+
+    pub async fn websocket_subscriptions(&self) -> Result<HashSet<String>> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let ws_guard = ws.read().await;
+            Ok(ws_guard.get_subscriptions().await)
+        } else {
+            Ok(HashSet::new())
+        }
+    }
+
+    pub async fn process_websocket_messages(&self) -> Result<()> {
+        if let Some(ref ws) = self.websocket.as_ref() {
+            let ws_guard = ws.read().await;
+            let messages = ws_guard.get_recent_messages(100).await;
+            drop(ws_guard); // Release the lock before processing messages
+            
+            for message in messages {
+                self.update_realtime_cache_from_websocket(message).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn get_current_price(&self, symbol: &str) -> Result<f64> {
+        let cache = self.realtime_cache.read().await;
+        if let Some(data) = cache.get(symbol) {
+            // Check if data is recent (within last 5 minutes)
+            if data.cached_at.elapsed() < Duration::from_secs(300) {
+                return Ok(data.get_current_price());
+            }
+        }
+        // Default fallback price if no real-time data
+        Ok(100.0)
+    }
+
+    /// Update real-time cache from WebSocket message
+    async fn update_realtime_cache_from_websocket(&self, message: WebSocketMessage) -> Result<()> {
+        match message {
+            WebSocketMessage::AggregateMinute { sym, c, v, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                cache.insert(sym.clone(), RealtimeTickerData {
+                    symbol: sym,
+                    last_price: c,
+                    last_volume: v,
+                    bid: None,
+                    ask: None,
+                    last_trade_time: t,
+                    cached_at: Instant::now(),
+                });
+                debug!("📡 Updated real-time cache from aggregate minute data");
+            },
+            WebSocketMessage::Quote { sym, bp, ap, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                if let Some(data) = cache.get_mut(&sym) {
+                    data.bid = Some(bp);
+                    data.ask = Some(ap);
+                    data.cached_at = Instant::now();
+                    debug!("📡 Updated real-time cache from quote data for {}", sym);
+                } else {
+                    // Create new entry if doesn't exist
+                    cache.insert(sym.clone(), RealtimeTickerData {
+                        symbol: sym,
+                        last_price: (bp + ap) / 2.0, // Mid price
+                        last_volume: 0.0,
+                        bid: Some(bp),
+                        ask: Some(ap),
+                        last_trade_time: t,
+                        cached_at: Instant::now(),
+                    });
+                }
+            },
+            WebSocketMessage::Trade { sym, p, s, t, .. } => {
+                let mut cache = self.realtime_cache.write().await;
+                if let Some(data) = cache.get_mut(&sym) {
+                    data.last_price = p;
+                    data.last_volume = s;
+                    data.last_trade_time = t;
+                    data.cached_at = Instant::now();
+                } else {
+                    cache.insert(sym.clone(), RealtimeTickerData {
+                        symbol: sym.clone(),
+                        last_price: p,
+                        last_volume: s,
+                        bid: None,
+                        ask: None,
+                        last_trade_time: t,
+                        cached_at: Instant::now(),
+                    });
+                }
+                debug!("📡 Updated real-time cache from trade data for {}", sym);
+            },
+            _ => {
+                debug!("📡 Ignoring WebSocket message: {:?}", message);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// DataModule now supports Arc sharing by separating WebSocket service
+#[derive(Debug, Clone)]
 pub struct DataModule {
     client: Client,
     api_key: Option<String>,
@@ -28,9 +197,10 @@ pub struct DataModule {
     indicator_cache: Arc<RwLock<HashMap<String, CachedIndicator>>>,
     market_data_cache: Arc<RwLock<HashMap<String, CachedMarketData>>>,
     cache_ttl: Duration,
-    // WebSocket integration for real-time data
-    websocket: Option<PolygonWebSocket>,
-    realtime_cache: Arc<RwLock<HashMap<String, RealtimeTickerData>>>,
+    // Shared WebSocket service for real-time data
+    websocket_service: Arc<WebSocketService>,
+    // Market schedule for intelligent data source selection
+    market_schedule: Arc<RwLock<MarketSchedule>>,
 }
 
 /// Cached technical indicator data with timestamp for TTL
@@ -89,6 +259,18 @@ impl RealtimeTickerData {
     }
 }
 
+/// Smart market data response with automatic source selection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartMarketData {
+    pub symbol: String,
+    pub price: f64,
+    pub volume: u64,
+    pub data_source: String,       // Description of data source used
+    pub timestamp: DateTime<Utc>,  // When data was retrieved
+    pub market_date: String,       // YYYY-MM-DD trading date
+    pub is_live: bool,            // True for real-time data, false for historical
+}
+
 impl DataModule {
     pub fn new(config: &Config) -> Result<Self> {
         let client = Client::builder()
@@ -102,19 +284,8 @@ impl DataModule {
         // All REST API calls use the same base URL - delayed data is indicated by response status
         let base_url = "https://api.polygon.io".to_string();
         
-        // Initialize WebSocket if enabled
-        let websocket = if polygon_enabled && 
-                          config.polygon_websocket_config.as_ref().map(|c| c.enabled).unwrap_or(false) {
-            match PolygonWebSocket::new(config) {
-                Ok(ws) => Some(ws),
-                Err(e) => {
-                    warn!("📡 Failed to initialize WebSocket: {}", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        // Initialize WebSocket service
+        let websocket_service = Arc::new(WebSocketService::new(config));
         
         if polygon_enabled {
             if config.polygon_use_delayed_data {
@@ -123,7 +294,7 @@ impl DataModule {
                 info!("✅ Polygon.io data module enabled with real-time data and in-memory cache");
             }
             
-            if websocket.is_some() {
+            if websocket_service.websocket.is_some() {
                 info!("📡 WebSocket integration enabled for streaming data");
             } else {
                 info!("📡 WebSocket integration disabled");
@@ -140,9 +311,116 @@ impl DataModule {
             indicator_cache: Arc::new(RwLock::new(HashMap::new())),
             market_data_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_ttl: Duration::from_secs(300), // 5 minutes cache TTL
-            websocket,
-            realtime_cache: Arc::new(RwLock::new(HashMap::new())),
+            websocket_service,
+            market_schedule: Arc::new(RwLock::new(MarketSchedule::new())),
         })
+    }
+
+    /// Initialize market schedule with database connection
+    pub async fn initialize_market_schedule(&mut self, db: &crate::database::Database) -> Result<()> {
+        let mut schedule = self.market_schedule.write().await;
+        
+        // Load cached holidays from database
+        schedule.load_holidays_from_cache(db).await?;
+        
+        // Update holidays if cache is stale
+        if schedule.should_refresh_holidays() {
+            if let Some(api_key) = &self.api_key {
+                if let Err(e) = schedule.refresh_holidays_from_api(db, api_key).await {
+                    warn!("Failed to refresh market holidays: {}", e);
+                    info!("Using existing holiday cache");
+                }
+            }
+        }
+        
+        let status = schedule.get_market_status();
+        let description = schedule.get_status_description();
+        info!("📅 Market Schedule initialized: {}", description);
+        info!("📊 Current market status: {:?}", status);
+        
+        Ok(())
+    }
+
+    /// Get current market status and data source strategy
+    pub async fn get_market_info(&self) -> Result<DataSourceStrategy> {
+        let schedule = self.market_schedule.read().await;
+        let strategy = schedule.get_data_source_strategy();
+        Ok(strategy)
+    }
+
+    /// Smart data retrieval method that automatically selects data source based on market status
+    /// Returns the most appropriate data for current market conditions
+    pub async fn get_smart_market_data(&self, symbol: &str) -> Result<SmartMarketData> {
+        let schedule = self.market_schedule.read().await;
+        let strategy = schedule.get_data_source_strategy();
+        let description = schedule.get_status_description();
+        
+        debug!("🧠 Smart data selection for {}: {}", symbol, description);
+        
+        match strategy {
+            DataSourceStrategy::RealTime { session, market_date } => {
+                // Market is open - use real-time or current data
+                debug!("📈 Market OPEN - fetching real-time data for {}", symbol);
+                
+                // Try WebSocket real-time data first (if available)
+                if let Some(realtime_data) = self.get_realtime_data(symbol).await? {
+                    return Ok(SmartMarketData {
+                        symbol: symbol.to_string(),
+                        price: realtime_data.get_current_price(),
+                        volume: realtime_data.last_volume as u64,
+                        data_source: format!("Real-time WebSocket ({:?})", session),
+                        timestamp: chrono::Utc::now(),
+                        market_date,
+                        is_live: true,
+                    });
+                }
+                
+                // Fallback to REST API current price
+                match self.get_current_market_price(symbol).await {
+                    Ok(price) => {
+                        Ok(SmartMarketData {
+                            symbol: symbol.to_string(),
+                            price,
+                            volume: 0, // Volume not available in this endpoint
+                            data_source: format!("REST API snapshot ({:?})", session),
+                            timestamp: chrono::Utc::now(),
+                            market_date,
+                            is_live: true,
+                        })
+                    },
+                    Err(_) => {
+                        // Final fallback to previous day if current data unavailable
+                        warn!("Current price unavailable for {}, falling back to previous day", symbol);
+                        let prev_day = self.get_previous_day_cached(symbol).await?;
+                        Ok(SmartMarketData {
+                            symbol: symbol.to_string(),
+                            price: prev_day.close.unwrap_or(0.0),
+                            volume: prev_day.volume.map(|v| v as u64).unwrap_or(0),
+                            data_source: "Previous day fallback".to_string(),
+                            timestamp: chrono::Utc::now(),
+                            market_date,
+                            is_live: false,
+                        })
+                    }
+                }
+            },
+            DataSourceStrategy::PreviousDay { summary_date, reason } => {
+                // Market is closed - use previous trading day's summary
+                debug!("📊 Market CLOSED - fetching summary data for {} ({})", symbol, summary_date);
+                
+                // Use daily market summary for the specified date
+                let prev_day = self.get_previous_day_cached(symbol).await?;
+                Ok(SmartMarketData {
+                    symbol: symbol.to_string(),
+                    price: prev_day.close.unwrap_or(0.0),
+                    volume: prev_day.volume.map(|v| v as u64).unwrap_or(0),
+                    data_source: format!("Daily summary - {:?}", reason),
+                    timestamp: chrono::Utc::now(),
+                    market_date: summary_date,
+                    is_live: false,
+                })
+            }
+        }
     }
 
     /// Get ticker snapshot - uses daily aggregates for basic plan compatibility
@@ -153,26 +431,49 @@ impl DataModule {
             return Ok(());
         }
         
-        // For basic plan: use daily aggregates for yesterday's data
+        // For basic plan: use daily aggregates for market-appropriate date
         // TODO: Switch to actual snapshot endpoint when upgrading to paid plan
-        self.get_yesterday_daily_data(symbol).await
+        self.get_market_daily_data(symbol).await
     }
 
-    /// Get yesterday's daily data for a symbol via API call
+    /// Get market-appropriate daily data for a symbol via API call
+    /// Uses market schedule to determine the correct trading date to fetch
     pub async fn get_symbol_data(&self, symbol: &str) -> Result<SymbolDataResponse> {
         if !self.polygon_enabled {
             anyhow::bail!("Polygon.io not available - check configuration and API key");
         }
-        // Get yesterday's date in YYYY-MM-DD format
-        let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
-        let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
+        
+        // Use market schedule to determine appropriate date
+        let schedule = self.market_schedule.read().await;
+        let strategy = schedule.get_data_source_strategy();
+        let target_date = match strategy {
+            DataSourceStrategy::RealTime { market_date, .. } => {
+                // Market is open - get current trading day data (but this will likely be incomplete)
+                // For daily aggregates, we should still get the previous complete day
+                // since current day aggregates may not be complete until market close
+                let schedule_time = schedule.current_time.with_timezone(&chrono_tz::US::Eastern);
+                if schedule_time.time() < chrono::NaiveTime::from_hms_opt(16, 0, 0).unwrap() {
+                    // Before 4 PM ET - use previous trading day for complete data
+                    let previous_date = chrono::Utc::now() - chrono::Duration::days(1);
+                    previous_date.format("%Y-%m-%d").to_string()
+                } else {
+                    // After 4 PM ET - current day data should be available
+                    market_date
+                }
+            },
+            DataSourceStrategy::PreviousDay { summary_date, .. } => {
+                // Market is closed - use the determined summary date
+                summary_date
+            }
+        };
+        drop(schedule);
         
         let url = format!(
             "{}/v2/aggs/ticker/{}/range/1/day/{}/{}",
-            self.base_url, symbol, yesterday_str, yesterday_str
+            self.base_url, symbol, target_date, target_date
         );
 
-        info!("API request: Fetching daily data for {} ({})", symbol, yesterday_str);
+        info!("API request: Fetching market-appropriate daily data for {} ({})", symbol, target_date);
         debug!("Request URL: {}", url);
 
         let response = self
@@ -226,7 +527,7 @@ impl DataModule {
                 
                 Ok(SymbolDataResponse {
                     symbol: symbol.to_string(),
-                    date: yesterday_str,
+                    date: target_date,
                     open: bar.open.unwrap_or(0.0),
                     high: bar.high.unwrap_or(0.0),
                     low: bar.low.unwrap_or(0.0),
@@ -238,11 +539,61 @@ impl DataModule {
                     change_percent,
                 })
             } else {
-                anyhow::bail!("No daily data available for {} on {} (market may be closed)", symbol, yesterday_str);
+                anyhow::bail!("No daily data available for {} on {} (market may be closed)", symbol, target_date);
             }
         } else {
-            anyhow::bail!("No daily data found for {} on {}", symbol, yesterday_str);
+            anyhow::bail!("No daily data found for {} on {}", symbol, target_date);
         }
+    }
+
+    /// Get current market price using the snapshot API
+    pub async fn get_current_market_price(&self, symbol: &str) -> Result<f64> {
+        let url = format!(
+            "{}/v2/snapshot/locale/us/markets/stocks/tickers/{}",
+            self.base_url, symbol
+        );
+
+        debug!("Fetching current price for {} from snapshot API", symbol);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("apikey", self.api_key.as_ref().unwrap().as_str())])
+            .send()
+            .await
+            .context("Failed to send snapshot request to Polygon API")?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Snapshot API request failed with status: {}", response.status());
+        }
+
+        let json_text = response.text().await?;
+        let snapshot_response: serde_json::Value = serde_json::from_str(&json_text)
+            .context("Failed to parse snapshot response")?;
+
+        // Extract current price from ticker.day.c (current day close) or ticker.min.c (latest minute)
+        if let Some(ticker) = snapshot_response.get("ticker") {
+            // Try current day close first
+            if let Some(day_close) = ticker.get("day").and_then(|d| d.get("c")).and_then(|c| c.as_f64()) {
+                if day_close > 0.0 {
+                    debug!("Using current day price: ${:.2} for {}", day_close, symbol);
+                    return Ok(day_close);
+                }
+            }
+            
+            // Fallback to latest minute close
+            if let Some(min_close) = ticker.get("min").and_then(|m| m.get("c")).and_then(|c| c.as_f64()) {
+                if min_close > 0.0 {
+                    debug!("Using latest minute price: ${:.2} for {}", min_close, symbol);
+                    return Ok(min_close);
+                }
+            }
+        }
+
+        // If no current data, fall back to previous day method
+        warn!("No current price data available for {}, falling back to previous day", symbol);
+        let prev_day_data = self.get_previous_day_cached(symbol).await?;
+        Ok(prev_day_data.close.unwrap_or(100.0))
     }
 
     /// Get ticker snapshot using the premium API endpoint
@@ -499,8 +850,8 @@ impl DataModule {
 
     /// Start WebSocket connections and subscribe to default symbols
     pub async fn start_websocket(&mut self) -> Result<()> {
-        if let Some(ref mut ws) = self.websocket {
-            ws.start().await?;
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            ws.write().await.start().await?;
             info!("📡 WebSocket started successfully");
         }
         Ok(())
@@ -508,8 +859,8 @@ impl DataModule {
 
     /// Subscribe to symbols via WebSocket (non-blocking)
     pub async fn websocket_subscribe(&self, symbols: Vec<String>) -> Result<()> {
-        if let Some(ref ws) = self.websocket {
-            ws.subscribe(symbols).await?;
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            ws.write().await.subscribe(symbols).await?;
         } else {
             anyhow::bail!("WebSocket not initialized");
         }
@@ -518,8 +869,8 @@ impl DataModule {
 
     /// Unsubscribe from symbols via WebSocket (non-blocking)
     pub async fn websocket_unsubscribe(&self, symbols: Vec<String>) -> Result<()> {
-        if let Some(ref ws) = self.websocket {
-            ws.unsubscribe(symbols).await?;
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            ws.write().await.unsubscribe(symbols).await?;
         } else {
             anyhow::bail!("WebSocket not initialized");
         }
@@ -528,8 +879,8 @@ impl DataModule {
 
     /// Get WebSocket connection status
     pub async fn websocket_status(&self) -> Option<ConnectionStatus> {
-        if let Some(ref ws) = self.websocket {
-            Some(ws.get_status().await)
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            Some(ws.read().await.get_status().await)
         } else {
             None
         }
@@ -537,8 +888,8 @@ impl DataModule {
 
     /// Get current WebSocket subscriptions
     pub async fn websocket_subscriptions(&self) -> Result<HashSet<String>> {
-        if let Some(ref ws) = self.websocket {
-            Ok(ws.get_subscriptions().await)
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            Ok(ws.read().await.get_subscriptions().await)
         } else {
             Ok(HashSet::new())
         }
@@ -546,8 +897,8 @@ impl DataModule {
 
     /// Process WebSocket messages and update real-time cache (called periodically)
     pub async fn process_websocket_messages(&self) -> Result<()> {
-        if let Some(ref ws) = self.websocket {
-            let messages = ws.get_recent_messages(100).await;
+        if let Some(ref ws) = self.websocket_service.websocket.as_ref() {
+            let messages: Vec<crate::data::websocket::WebSocketMessage> = ws.read().await.get_recent_messages(100).await;
             
             for message in messages {
                 self.update_realtime_cache_from_websocket(message).await?;
@@ -560,7 +911,7 @@ impl DataModule {
     async fn update_realtime_cache_from_websocket(&self, message: WebSocketMessage) -> Result<()> {
         match message {
             WebSocketMessage::AggregateMinute { sym, c, v, t, .. } => {
-                let mut cache = self.realtime_cache.write().await;
+                let mut cache = self.websocket_service.realtime_cache.write().await;
                 cache.insert(sym.clone(), RealtimeTickerData {
                     symbol: sym,
                     last_price: c,
@@ -573,7 +924,7 @@ impl DataModule {
                 debug!("📡 Updated real-time cache from aggregate minute data");
             },
             WebSocketMessage::Quote { sym, bp, ap, t, .. } => {
-                let mut cache = self.realtime_cache.write().await;
+                let mut cache = self.websocket_service.realtime_cache.write().await;
                 if let Some(data) = cache.get_mut(&sym) {
                     data.bid = Some(bp);
                     data.ask = Some(ap);
@@ -593,7 +944,7 @@ impl DataModule {
                 }
             },
             WebSocketMessage::Trade { sym, p, s, t, .. } => {
-                let mut cache = self.realtime_cache.write().await;
+                let mut cache = self.websocket_service.realtime_cache.write().await;
                 if let Some(data) = cache.get_mut(&sym) {
                     data.last_price = p;
                     data.last_volume = s;
@@ -622,7 +973,7 @@ impl DataModule {
     pub async fn get_realtime_data(&self, symbol: &str) -> Result<Option<RealtimeTickerData>> {
         // Check real-time cache first
         {
-            let cache = self.realtime_cache.read().await;
+            let cache = self.websocket_service.realtime_cache.read().await;
             if let Some(data) = cache.get(symbol) {
                 // Check if data is fresh (within cache TTL)
                 if data.cached_at.elapsed() < self.cache_ttl {
@@ -794,8 +1145,9 @@ impl DataModule {
         Ok(indicator_response)
     }
 
-    /// Get yesterday's daily data for a symbol (compatible with basic plan) - for internal testing
-    pub async fn get_yesterday_daily_data(&self, symbol: &str) -> Result<()> {
+    /// Get market-appropriate daily data for a symbol (compatible with basic plan) - for internal testing
+    /// Uses market schedule to determine correct trading date
+    pub async fn get_market_daily_data(&self, symbol: &str) -> Result<()> {
         match self.get_symbol_data(symbol).await {
             Ok(data) => {
                 info!("=== {} Daily Data ({}) ===", data.symbol, data.date);

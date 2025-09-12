@@ -66,15 +66,36 @@ pub struct StartEngineResponse {
 }
 
 // Get all trading rules
-pub async fn get_rules(_state: State<Arc<TradingEngine>>) -> Json<RulesListResponse> {
+pub async fn get_rules(State(engine): State<Arc<TradingEngine>>) -> Json<RulesListResponse> {
     tracing::info!("📋 Trading rules list request");
 
-    Json(RulesListResponse {
-        success: true,
-        rules: Some(vec![]),
-        count: Some(0),
-        error: None,
-    })
+    match engine.get_all_trading_rules().await {
+        Ok(rules) => {
+            let count = rules.len();
+            tracing::info!("✅ Retrieved {} trading rules", count);
+            
+            // Convert rules to JSON values for the response
+            let rules_json: Vec<serde_json::Value> = rules.iter()
+                .map(|rule| serde_json::to_value(rule).unwrap_or_default())
+                .collect();
+
+            Json(RulesListResponse {
+                success: true,
+                rules: Some(rules_json),
+                count: Some(count),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to retrieve trading rules: {}", e);
+            Json(RulesListResponse {
+                success: false,
+                rules: None,
+                count: None,
+                error: Some(e.to_string()),
+            })
+        }
+    }
 }
 
 // Create new trading rule
@@ -207,12 +228,43 @@ pub async fn get_rules_engine_status(
 
     let is_running = engine.is_rules_engine_running();
 
+    // Get actual rule counts
+    let (total_rules, active_rules, performance_stats) = match engine.get_all_trading_rules().await {
+        Ok(rules) => {
+            let total = rules.len();
+            let active = rules.iter().filter(|rule| rule.active).count();
+            
+            // Try to get performance stats if engine is running
+            let stats = if is_running {
+                match engine.get_rules_engine_stats().await {
+                    Ok(stats) => Some(serde_json::json!({
+                        "total_decisions": stats.total_decisions,
+                        "average_decision_time_micros": stats.average_decision_time_micros,
+                        "cache_stats": stats.cache_stats
+                    })),
+                    Err(e) => {
+                        tracing::warn!("Could not get performance stats: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            
+            (total, active, stats)
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get rules for status: {}", e);
+            (0, 0, None)
+        }
+    };
+
     Json(RulesEngineStatusResponse {
         success: true,
         running: is_running,
-        total_rules: 0,
-        active_rules: 0, 
-        performance_stats: None,
+        total_rules,
+        active_rules,
+        performance_stats,
         error: None,
     })
 }

@@ -12,7 +12,7 @@ use crate::types::{
 
 /// Risk management system for trading decisions
 /// Ensures portfolio safety and position sizing according to risk parameters
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RiskManager {
     risk_params: RiskParameters,
 }

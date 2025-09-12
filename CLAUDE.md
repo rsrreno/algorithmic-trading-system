@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v9.2.25.1  
-**Last Updated:** 2025-09-11 - **RULES ENGINE INTEGRATION ANALYSIS COMPLETE**: DataModule cloning issue identified, refactoring approach planned  
+**Project Version:** v9.11.25.1  
+**Last Updated:** 2025-09-12 - **ENHANCED POSITION TRACKING IMPLEMENTATION**: Complete redesign with weighted average cost basis, database-direct sell processing, and cumulative realized P&L display  
 **Related Files:** `STATUS.md`, `README.md`
 
 ## Project Overview
@@ -226,6 +226,8 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
    - Check `git branch --show-current` matches the intended remote branch
    - Push the branch to update the remote repo with session changes
    - Ensure all work is preserved and accessible
+5. **Update the Cargo.toml file**:
+   - Update version numbers to match current git branch
 
 ### Git Best Practices
 - **Commit messages**: Use descriptive messages with emoji prefixes
@@ -234,4 +236,4 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `9.2.25.1` | **Development Phase:** Rules Engine Integration + DataModule Refactoring
+**Git Branch:** `9.11.25.1` | **Development Phase:** Enhanced Position Tracking System Implementation

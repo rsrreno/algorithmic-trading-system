@@ -17,6 +17,7 @@ pub struct Config {
     pub metrics_address: String,
     pub enable_polygon: bool,
     pub enable_lightspeed: bool,
+    pub rules_engine_config: RulesEngineConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,9 +39,6 @@ pub struct PaperTradingConfig {
     pub commission_per_share: f64,
     pub enable_commission: bool,
     pub session_id: String,
-    pub rules_evaluation_interval_ms: u64,
-    pub default_entry_price_fallback: f64,
-    pub risk_threshold_dollars: f64,
 }
 
 impl Default for PaperTradingConfig {
@@ -50,9 +48,6 @@ impl Default for PaperTradingConfig {
             commission_per_share: 0.005,
             enable_commission: true,
             session_id: "default-session".to_string(),
-            rules_evaluation_interval_ms: 1000,
-            default_entry_price_fallback: 100.0,
-            risk_threshold_dollars: 1000.0,
         }
     }
 }
@@ -75,6 +70,36 @@ pub struct LightspeedConfig {
     pub client_id: String,
     pub account_id: String,
     pub sandbox: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RulesEngineConfig {
+    pub enabled: bool,
+    pub evaluation_interval_ms: Option<u64>,
+    pub max_decision_time_ms: Option<u64>,
+    pub warning_threshold_ms: Option<u64>,
+    pub track_performance: bool,
+    pub log_all_decisions: bool,
+    pub require_user_confirmation: bool,
+    pub decision_history_days: Option<u32>,
+    pub price_fallback_strategy: PriceFallbackStrategy,
+    pub default_watchlist_symbols: Vec<String>,
+    pub allow_new_positions: Option<bool>,
+    pub max_concurrent_rules: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PriceFallbackStrategy {
+    LastKnown,
+    MarketClose,
+    UserConfigured(f64),
+    Refuse, // Don't execute if no price available
+}
+
+impl Default for PriceFallbackStrategy {
+    fn default() -> Self {
+        Self::Refuse // Safe default - don't assume price
+    }
 }
 
 impl Config {
@@ -179,18 +204,66 @@ impl Config {
                     .unwrap_or(true),
                 session_id: env::var("PAPER_SESSION_ID")
                     .unwrap_or_else(|_| "default-session".to_string()),
-                rules_evaluation_interval_ms: env::var("RULES_EVALUATION_INTERVAL_MS")
-                    .unwrap_or_else(|_| "1000".to_string())
+            },
+
+            // Rules Engine Configuration
+            rules_engine_config: RulesEngineConfig {
+                enabled: env::var("RULES_ENGINE_ENABLED")
+                    .unwrap_or_else(|_| "false".to_string())
                     .parse()
-                    .unwrap_or(1000),
-                default_entry_price_fallback: env::var("DEFAULT_ENTRY_PRICE_FALLBACK")
-                    .unwrap_or_else(|_| "100.0".to_string())
+                    .unwrap_or(false),
+                evaluation_interval_ms: env::var("RULES_ENGINE_EVALUATION_INTERVAL_MS")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
+                max_decision_time_ms: env::var("RULES_ENGINE_MAX_DECISION_TIME_MS")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
+                warning_threshold_ms: env::var("RULES_ENGINE_WARNING_THRESHOLD_MS")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
+                track_performance: env::var("RULES_TRACK_PERFORMANCE_METRICS")
+                    .unwrap_or_else(|_| "true".to_string())
                     .parse()
-                    .unwrap_or(100.0),
-                risk_threshold_dollars: env::var("RISK_THRESHOLD_DOLLARS")
-                    .unwrap_or_else(|_| "1000.0".to_string())
+                    .unwrap_or(true),
+                log_all_decisions: env::var("RULES_LOG_ALL_DECISIONS")
+                    .unwrap_or_else(|_| "false".to_string())
                     .parse()
-                    .unwrap_or(1000.0),
+                    .unwrap_or(false),
+                require_user_confirmation: env::var("RULES_REQUIRE_USER_CONFIRMATION")
+                    .unwrap_or_else(|_| "true".to_string())
+                    .parse()
+                    .unwrap_or(true),
+                decision_history_days: env::var("RULES_DECISION_HISTORY_DAYS")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
+                price_fallback_strategy: match env::var("RULES_FALLBACK_PRICE_SOURCE")
+                    .unwrap_or_else(|_| "REFUSE".to_string())
+                    .to_uppercase()
+                    .as_str()
+                {
+                    "LAST_KNOWN" => PriceFallbackStrategy::LastKnown,
+                    "MARKET_CLOSE" => PriceFallbackStrategy::MarketClose,
+                    price if price.starts_with("USER_") => {
+                        if let Ok(value) = price.strip_prefix("USER_").unwrap_or("0").parse::<f64>() {
+                            PriceFallbackStrategy::UserConfigured(value)
+                        } else {
+                            PriceFallbackStrategy::Refuse
+                        }
+                    },
+                    _ => PriceFallbackStrategy::Refuse,
+                },
+                default_watchlist_symbols: env::var("RULES_DEFAULT_WATCHLIST_SYMBOLS")
+                    .unwrap_or_else(|_| String::new())
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                allow_new_positions: env::var("RULES_ALLOW_NEW_POSITIONS")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
+                max_concurrent_rules: env::var("RULES_MAX_CONCURRENT_RULES")
+                    .ok()
+                    .and_then(|s| s.parse().ok()),
             },
 
             // Trading Mode Configuration
@@ -257,6 +330,19 @@ impl Config {
             tracing::warn!("No data sources or brokers configured - system will run in limited mode");
         }
         
+        // Validate rules engine configuration
+        if self.rules_engine_config.enabled {
+            if self.rules_engine_config.evaluation_interval_ms.is_none() {
+                tracing::warn!("Rules engine enabled but evaluation interval not set - user must configure before starting");
+            }
+            if self.rules_engine_config.max_decision_time_ms.is_none() {
+                tracing::warn!("Rules engine enabled but max decision time not set - user must configure before starting");
+            }
+            if self.rules_engine_config.default_watchlist_symbols.is_empty() {
+                tracing::warn!("Rules engine enabled but no default watchlist symbols configured");
+            }
+        }
+        
         Ok(())
     }
     
@@ -270,5 +356,15 @@ impl Config {
     
     pub fn is_lightspeed_enabled(&self) -> bool {
         self.enable_lightspeed && self.lightspeed_config.is_some()
+    }
+    
+    pub fn is_rules_engine_enabled(&self) -> bool {
+        self.rules_engine_config.enabled
+    }
+    
+    pub fn rules_engine_ready(&self) -> bool {
+        self.rules_engine_config.enabled &&
+        self.rules_engine_config.evaluation_interval_ms.is_some() &&
+        self.rules_engine_config.max_decision_time_ms.is_some()
     }
 }

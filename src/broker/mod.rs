@@ -117,18 +117,11 @@ impl BrokerModule {
         match self.trading_mode {
             TradingMode::Paper => {
                 if let Some(paper_broker) = &self.paper_broker {
-                    // Convert side string to PositionSide
-                    let position_side = match side.to_uppercase().as_str() {
-                        "BUY" => PositionSide::Long,
-                        "SELL" | "SELL_SHORT" => PositionSide::Short,
-                        _ => return Err(anyhow::anyhow!("Invalid order side: {}", side)),
-                    };
-                    
-                    // Execute paper trade
+                    // Execute paper trade with proper SELL vs SELL_SHORT logic
                     tracing::info!("📝 Executing paper trade: {} {} shares of {}", side, quantity, symbol);
-                    paper_broker.execute_trade(
+                    paper_broker.execute_trade_with_side(
                         symbol, 
-                        position_side, 
+                        side, // Pass string directly - method will handle BUY/SELL/SELL_SHORT logic
                         quantity as u32, 
                         None, // rule_id - can be added later for rule tracking
                         None  // rule_name - can be added later for rule tracking
@@ -278,6 +271,35 @@ impl BrokerModule {
         } else {
             Ok(0.0)
         }
+    }
+
+    /// Get real-time portfolio snapshot with actual position values
+    pub async fn get_portfolio_snapshot(&self) -> Result<crate::types::PortfolioState> {
+        if let Some(paper_broker) = &self.paper_broker {
+            paper_broker.get_portfolio_snapshot().await
+        } else {
+            // Return empty portfolio if no paper broker
+            Ok(crate::types::PortfolioState {
+                total_value: 0.0,
+                available_cash: 0.0,
+                total_exposure: 0.0,
+                max_positions: 0,
+                current_position_count: 0,
+                positions: std::collections::HashMap::new(),
+                last_updated: chrono::Utc::now(),
+            })
+        }
+    }
+
+    /// Refresh paper broker position cache (used after database reset)
+    pub async fn refresh_paper_broker_cache(&mut self) -> Result<()> {
+        if let Some(paper_broker) = &self.paper_broker {
+            paper_broker.refresh_position_cache().await?;
+            tracing::info!("✅ Paper broker position cache refreshed");
+        } else {
+            tracing::warn!("⚠️ No paper broker available to refresh cache");
+        }
+        Ok(())
     }
 }
 

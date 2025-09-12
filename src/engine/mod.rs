@@ -23,9 +23,6 @@ pub struct TradingEngine {
     // Data module for market data
     data_module: DataModule,
     
-    // Rules engine for trading decisions
-    rules_engine: Option<Arc<RulesEngine>>,
-    
     // Memory management
     total_memory_used: AtomicU64,
     max_memory_bytes: u64,
@@ -35,7 +32,10 @@ pub struct TradingEngine {
     market_streams: Arc<RwLock<DashMap<String, MarketDataStream>>>,
     
     // Broker integration
-    broker: Arc<RwLock<BrokerModule>>,
+    broker_module: Arc<RwLock<BrokerModule>>,
+    
+    // Rules engine for automated trading decisions
+    rules_engine: Option<Arc<RulesEngine>>,
     
     // Shutdown signal
     shutdown_signal: Arc<tokio::sync::Notify>,
@@ -51,6 +51,11 @@ impl TradingEngine {
         let mut data_module = DataModule::new(&config)?;
         info!("✅ Data module initialized");
         
+        // Initialize market schedule system
+        if let Err(e) = data_module.initialize_market_schedule(&database).await {
+            warn!("⚠️ Failed to initialize market schedule: {}", e);
+        }
+        
         // Start WebSocket connections if enabled
         if let Err(e) = data_module.start_websocket().await {
             warn!("⚠️ Failed to start WebSocket: {}", e);
@@ -62,9 +67,14 @@ impl TradingEngine {
         // Initialize appropriate broker based on trading mode
         match config.trading_mode {
             crate::config::TradingMode::Paper | crate::config::TradingMode::Simulation => {
-                // For paper trading, we don't need the real data module integration yet
-                // This will be completed in the next phase
-                tracing::info!("📊 Paper trading mode enabled - integration in progress");
+                // Initialize paper broker with database and data module
+                tracing::info!("📊 Initializing paper trading broker");
+                broker.try_initialize_paper_broker(
+                    config.paper_trading_config.clone(),
+                    database.clone(),
+                    Arc::new(data_module.clone()),
+                ).await?;
+                tracing::info!("✅ Paper trading broker initialized successfully");
             }
             crate::config::TradingMode::Live => {
                 // Try to initialize LightSpeed connection for live trading
@@ -82,12 +92,12 @@ impl TradingEngine {
             config,
             database,
             data_module,
+            broker_module: Arc::new(RwLock::new(broker)),
             rules_engine: None, // Will be initialized separately if rules engine is enabled
             total_memory_used: AtomicU64::new(0),
             max_memory_bytes,
             positions: Arc::new(RwLock::new(DashMap::new())),
             market_streams: Arc::new(RwLock::new(DashMap::new())),
-            broker: Arc::new(RwLock::new(broker)),
             shutdown_signal: Arc::new(tokio::sync::Notify::new()),
         };
         
@@ -189,6 +199,51 @@ impl TradingEngine {
     pub async fn lookup_symbol(&self, symbol: &str) -> Result<crate::data::SymbolDataResponse> {
         self.data_module.get_symbol_data(symbol).await
     }
+
+    /// Get current market data for symbol (uses snapshot API for real-time prices)
+    pub async fn get_current_symbol_data(&self, symbol: &str) -> Result<crate::data::SymbolDataResponse> {
+        // Try to get current price from snapshot API first
+        match self.data_module.get_current_market_price(symbol).await {
+            Ok(current_price) => {
+                // Get previous day data for volume/other stats, but use current price
+                match self.data_module.get_symbol_data(symbol).await {
+                    Ok(mut prev_data) => {
+                        // Update with current price and calculate change
+                        let prev_close = prev_data.close;
+                        prev_data.close = current_price;
+                        prev_data.change = current_price - prev_close;
+                        prev_data.change_percent = if prev_close > 0.0 {
+                            ((current_price - prev_close) / prev_close) * 100.0
+                        } else {
+                            0.0
+                        };
+                        prev_data.date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                        Ok(prev_data)
+                    }
+                    Err(_) => {
+                        // Create minimal response with current price only
+                        Ok(crate::data::SymbolDataResponse {
+                            symbol: symbol.to_string(),
+                            date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                            open: current_price,
+                            high: current_price,
+                            low: current_price,
+                            close: current_price,
+                            volume: 0,
+                            vwap: current_price,
+                            transactions: 0,
+                            change: 0.0,
+                            change_percent: 0.0,
+                        })
+                    }
+                }
+            }
+            Err(_) => {
+                // Fall back to previous day data if current price not available
+                self.data_module.get_symbol_data(symbol).await
+            }
+        }
+    }
     
     pub async fn place_order(
         &self,
@@ -198,22 +253,22 @@ impl TradingEngine {
         quantity: u64,
         price: Option<f64>,
     ) -> Result<String> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.place_stock_order(symbol, side, order_type, quantity, price).await
     }
     
     pub async fn cancel_order(&self, client_order_id: &str) -> Result<()> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.cancel_order(client_order_id).await
     }
     
     pub async fn get_positions(&self) -> Result<std::collections::HashMap<String, Position>> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.get_positions().await
     }
     
     pub async fn is_broker_connected(&self) -> bool {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.is_connected().await
     }
     
@@ -232,7 +287,7 @@ impl TradingEngine {
         self.shutdown_signal.notify_waiters();
         
         // Disconnect broker
-        let mut broker = self.broker.write().await;
+        let mut broker = self.broker_module.write().await;
         broker.disconnect().await?;
         
         // Close all positions (placeholder)
@@ -287,12 +342,34 @@ impl TradingEngine {
             }
         };
 
-        // Initialize rules engine with all required components
-        // Note: For now, create a placeholder implementation since DataModule doesn't implement Clone
-        // In production, you'd need to refactor DataModule to support sharing
-        info!("⚠️  Rules engine architecture is complete but requires DataModule refactoring for full integration");
+        // Initialize rules engine with configuration
+        let rules_engine = RulesEngine::new(
+            Arc::new(self.data_module.clone()),
+            self.broker_module.clone(),
+            self.database.clone(),
+            risk_params,
+            initial_cash,
+            self.config.rules_engine_config.clone(),
+        )?;
         
-        info!("✅ Rules engine started successfully with technical indicators integration");
+        // Start the rules engine
+        if let Err(e) = rules_engine.start().await {
+            error!("Failed to start rules engine: {}", e);
+            return Err(e);
+        }
+        
+        info!("✅ Rules engine started successfully with user-configured parameters");
+        
+        // Store the rules engine for later use
+        self.rules_engine = Some(Arc::new(rules_engine));
+
+        // Load existing rules from database
+        if let Some(engine) = &self.rules_engine {
+            if let Err(e) = engine.load_rules_from_database().await {
+                warn!("Failed to load rules from database: {}", e);
+            }
+        }
+
         Ok(())
     }
 
@@ -327,6 +404,16 @@ impl TradingEngine {
         }
     }
 
+    /// Get all trading rules from the rules engine
+    pub async fn get_all_trading_rules(&self) -> Result<Vec<crate::types::EnhancedTradingRule>> {
+        if let Some(rules_engine) = &self.rules_engine {
+            rules_engine.get_all_rules().await
+        } else {
+            // If rules engine is not initialized, return empty vector
+            Ok(Vec::new())
+        }
+    }
+
     /// Get portfolio state from rules engine
     pub async fn get_portfolio_state(&self) -> Result<crate::types::PortfolioState> {
         if let Some(rules_engine) = &self.rules_engine {
@@ -352,7 +439,7 @@ impl TradingEngine {
 
     /// Get broker module reference for rules engine integration  
     pub async fn get_broker_module(&self) -> tokio::sync::RwLockReadGuard<BrokerModule> {
-        self.broker.read().await
+        self.broker_module.read().await
     }
 
     /// Get database reference for configuration and persistence
@@ -369,13 +456,13 @@ impl TradingEngine {
         rule_id: Option<String>,
         rule_name: Option<String>,
     ) -> Result<String> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.execute_paper_trade(symbol, side, quantity, rule_id, rule_name).await
     }
 
     /// Close a paper trading position
     pub async fn close_paper_position(&self, symbol: &str, rule_id: Option<String>) -> Result<f64> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.close_paper_position(symbol, rule_id).await
     }
 
@@ -387,19 +474,25 @@ impl TradingEngine {
 
     /// Calculate unrealized P&L for paper trading positions
     pub async fn calculate_unrealized_pnl(&self) -> Result<f64> {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.calculate_unrealized_pnl().await
     }
 
     /// Check if paper trading is enabled
     pub async fn is_paper_trading_enabled(&self) -> bool {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.is_paper_enabled()
     }
 
     /// Get current trading mode
     pub async fn get_trading_mode(&self) -> crate::config::TradingMode {
-        let broker = self.broker.read().await;
+        let broker = self.broker_module.read().await;
         broker.get_trading_mode().clone()
+    }
+
+    /// Refresh paper broker cache after database reset
+    pub async fn refresh_paper_broker_cache(&self) -> Result<()> {
+        let mut broker = self.broker_module.write().await;
+        broker.refresh_paper_broker_cache().await
     }
 }
