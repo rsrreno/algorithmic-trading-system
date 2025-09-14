@@ -1,1 +1,21 @@
-{}
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "node",
+      "args": [
+        "/home/bill/bot/trading-system/mcp/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js",
+        "/home/bill/bot/trading-system"
+      ],
+      "env": {}
+    },
+    "trading-system": {
+      "command": "node",
+      "args": [
+        "/home/bill/bot/trading-system/mcp/trading-mcp-server.js"
+      ],
+      "env": {
+        "DB_PATH": "/home/bill/bot/trading-system/data/trading.db"
+      }
+    }
+  }
+}

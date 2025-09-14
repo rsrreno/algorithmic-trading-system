@@ -1,0 +1,19 @@
+{
+  "name": "mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP servers for trading system",
+  "main": "trading-mcp-server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "@modelcontextprotocol/server-filesystem": "^2025.8.21",
+    "sqlite3": "^5.1.6",
+    "zod": "^3.22.4"
+  }
+}
