@@ -1,7 +1,7 @@
 # Cargo.toml
 [package]
 name = "trading-system"
-version = "9.11.25.1"
+version = "9.11.25"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "High-performance algorithmic trading system"

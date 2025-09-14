@@ -896,14 +896,14 @@ impl PaperBroker {
         let positions = self.open_positions.read().await;
         let mut total_unrealized = 0.0;
 
-        for (symbol, position) in positions.iter() {
-            match self.get_current_price(symbol).await {
+        for (_position_id, position) in positions.iter() {
+            match self.get_current_price(&position.symbol).await {
                 Ok(current_price) => {
                     let pnl = (current_price - position.avg_cost_basis) * position.quantity as f64;
                     total_unrealized += pnl;
                 }
                 Err(e) => {
-                    warn!("Could not get current price for {}: {}", symbol, e);
+                    warn!("Could not get current price for {}: {}", position.symbol, e);
                 }
             }
         }
@@ -929,8 +929,8 @@ impl PaperBroker {
         let mut total_exposure = 0.0;
         let mut calculated_positions = std::collections::HashMap::new();
         
-        for (symbol, position) in positions_map.iter() {
-            match self.get_current_price(symbol).await {
+        for (_position_id, position) in positions_map.iter() {
+            match self.get_current_price(&position.symbol).await {
                 Ok(current_price) => {
                     let position_value = current_price * position.quantity as f64;
                     let unrealized_pnl = (current_price - position.avg_cost_basis) * position.quantity as f64;
@@ -939,9 +939,9 @@ impl PaperBroker {
                     total_exposure += position_value;
                     
                     // Create Position struct for the response
-                    calculated_positions.insert(symbol.clone(), crate::types::Position {
-                        id: format!("{}_{}", symbol, position.opened_at.timestamp()),
-                        symbol: symbol.clone(),
+                    calculated_positions.insert(position.symbol.clone(), crate::types::Position {
+                        id: format!("{}_{}", position.symbol, position.opened_at.timestamp()),
+                        symbol: position.symbol.clone(),
                         quantity: position.quantity,
                         avg_cost_basis: position.avg_cost_basis,
                         total_cost: position.total_cost,
@@ -954,15 +954,15 @@ impl PaperBroker {
                     });
                 }
                 Err(e) => {
-                    warn!("Could not get current price for {}: {}", symbol, e);
+                    warn!("Could not get current price for {}: {}", position.symbol, e);
                     // Use average cost basis as fallback
                     let position_value = position.avg_cost_basis * position.quantity as f64;
                     total_position_value += position_value;
                     total_exposure += position_value;
                     
-                    calculated_positions.insert(symbol.clone(), crate::types::Position {
-                        id: format!("{}_{}", symbol, position.opened_at.timestamp()),
-                        symbol: symbol.clone(),
+                    calculated_positions.insert(position.symbol.clone(), crate::types::Position {
+                        id: format!("{}_{}", position.symbol, position.opened_at.timestamp()),
+                        symbol: position.symbol.clone(),
                         quantity: position.quantity,
                         avg_cost_basis: position.avg_cost_basis,
                         total_cost: position.total_cost,
