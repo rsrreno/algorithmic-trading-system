@@ -1,6 +1,6 @@
 # API Endpoints Documentation
 
-**Project Version:** v8.28.25.1  
+**Project Version:** v8.28.25  
 **Last Updated:** 2025-09-02  
 **Related Files:** `CLAUDE.md`, `STATUS.md`, `README.md`
 

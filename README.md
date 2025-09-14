@@ -1,6 +1,6 @@
 # Algorithmic Trading System
 
-**Project Version:** v9.2.25.1  
+**Project Version:** v9.2.25  
 **Last Updated:** 2025-09-11 - **RULES ENGINE INTEGRATION STARTED**: DataModule architecture analysis complete, refactoring planned  
 **Related Files:** `CLAUDE.md`, `STATUS.md`
 

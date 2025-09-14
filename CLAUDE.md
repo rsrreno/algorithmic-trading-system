@@ -1,8 +1,13 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v9.11.25.1  
+**Project Version:** v9.11.25  
 **Last Updated:** 2025-09-12 - **ENHANCED POSITION TRACKING IMPLEMENTATION**: Complete redesign with weighted average cost basis, database-direct sell processing, and cumulative realized P&L display  
 **Related Files:** `STATUS.md`, `README.md`
+
+**Documentation Organization**:
+- **CLAUDE.md**: High-level development guidelines, coding standards, and workflow instructions
+- **README.md**: User-focused documentation for setup, usage, and basic project information  
+- **STATUS.md**: Detailed project implementation tracking, progress updates, and session summaries
 
 ## Project Overview
 High-frequency algorithmic trading system with <5ms latency requirements for momentum/breakout trading strategies.
@@ -31,13 +36,13 @@ High-frequency algorithmic trading system with <5ms latency requirements for mom
 **ALL source files must begin with file path and current branch comments:**
 ```rust
 // src/rules/mod.rs
-// Branch: 8.28.25.1
+// Branch: 8.28.25
 
 // src/broker/lightspeed.rs
-// Branch: 8.28.25.1
+// Branch: 8.28.25
 
 // src/data/polygon.rs
-// Branch: 8.28.25.1
+// Branch: 8.28.25
 ```
 
 ### Documentation Standards
@@ -50,7 +55,7 @@ High-frequency algorithmic trading system with <5ms latency requirements for mom
 ```rust
 // Good example with proper documentation
 // src/rules/indicators.rs
-// Branch: 8.28.25.1
+// Branch: 8.28.25
 
 /// Calculates Exponential Moving Average for given period
 /// 
@@ -183,17 +188,16 @@ src/
 ## Version Management & Git Workflow
 
 ### Versioning Scheme
-- **Format**: `M.DD.YY.I` (Month.Day.Year.Iteration)
+- **Format**: `M.DD.YY` (Month.Day.Year)
 - **Examples**: 
-  - `8.21.25.1` = August 21, 2025, iteration 1
-  - `8.23.25.1` = August 23, 2025, iteration 1
-  - `8.23.25.2` = August 23, 2025, iteration 2
+  - `8.21.25` = August 21, 2025
+
 
 ### Git Branch Management
 1. **main branch**: Stable, production-ready code
-2. **Development branches**: Named with version scheme (e.g., `8.23.25.1`)
+2. **Development branches**: Named with version scheme (e.g., `8.23.25`)
 3. **Branch lifecycle**:
-   - Create feature branch from main: `git checkout -b 8.23.25.1`
+   - Create feature branch from main: `git checkout -b 8.23.25`
    - Develop and commit work to feature branch
    - When ready: merge to main and push
    - **Keep branches**: Do NOT delete branches (preserve for reference)
@@ -236,4 +240,5 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `9.11.25.1` | **Development Phase:** Enhanced Position Tracking System Implementation
+**Git Branch:** `9.11.25` | **Development Phase:** Enhanced Position Tracking System Implementation
+
