@@ -48,6 +48,9 @@ WORKDIR /app
 COPY --from=builder /app/target/release/trading-system /app/trading-system
 COPY --from=builder /app/migrations /app/migrations
 
+# Copy static assets
+COPY static /app/static
+
 # Create directories for data and logs with proper permissions
 RUN mkdir -p /app/data /app/logs /app/config && \
     chown -R app:app /app && \

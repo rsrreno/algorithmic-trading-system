@@ -241,4 +241,4 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 
 ---
 **Git Branch:** `9.11.25` | **Development Phase:** Enhanced Position Tracking System Implementation
-
+- #1- use the same database but create new tables, views, indexes etc. as needed.  #2 - I'm not sure yet, we will have to do some testing during market hours.  #3 Never switch modes unless a user specifies it.  if a broker is disconnected, show an error and try reconnection.  #4 fresh start.  #5 sperate page off the exisisting page.

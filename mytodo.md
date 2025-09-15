@@ -6,3 +6,6 @@ rules for stop loss
 
 rules for moving stop to take profit
 
+Implement MCP server
+    - Done - File
+    - Done - Custom, Docker, SqlLite

@@ -1,5 +1,5 @@
 // src/engine/mod.rs
-// Branch: 9.2.25.1
+// Branch: 14.9.25
 
 use anyhow::Result;
 use std::sync::{atomic::AtomicU64, Arc};
@@ -62,7 +62,7 @@ impl TradingEngine {
         }
         
         // Initialize broker module with trading mode
-        let mut broker = BrokerModule::new(config.trading_mode.clone());
+        let mut broker = BrokerModule::new(config.trading_mode.clone(), database.clone());
         
         // Initialize appropriate broker based on trading mode
         match config.trading_mode {

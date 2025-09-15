@@ -6,6 +6,7 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
+use tower_http::services::ServeDir;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -315,6 +316,7 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
     let app = Router::new()
         .route("/", get(root))
         .route("/rules", get(rules_page))
+        .route("/broker-positions", get(broker_positions_page))
         .route("/health", get(health))
         .route("/api/status", get(get_status))
         .route("/api/symbol", post(lookup_symbol))
@@ -355,6 +357,8 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         // Portfolio & Position endpoints
         .route("/api/positions", get(get_positions))
         .route("/api/portfolio", get(get_portfolio))
+        .route("/api/broker/positions", get(get_broker_positions))
+        .route("/api/broker/portfolio", get(get_broker_portfolio))
         // Risk Configuration endpoints
         .route("/api/risk", get(get_risk_config))
         .route("/api/risk", post(update_risk_config))
@@ -379,6 +383,9 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         // .route("/api/paper/sessions/:session_id/trades", get(get_paper_trades))
         // .route("/api/paper/trade", post(execute_paper_trade))
         // .route("/api/paper/positions/:symbol/close", post(close_paper_position))
+
+        // Static file serving
+        .nest_service("/static", ServeDir::new("static"))
         .with_state(engine);
 
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
@@ -394,7 +401,7 @@ async fn root() -> Html<&'static str> {
     Html(r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>📊 Paper Trading Dashboard</title>
+    <title>Paper Trading Dashboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -705,7 +712,8 @@ async fn root() -> Html<&'static str> {
                     <span class="status-indicator status-online" id="statusDot"></span>
                     <span id="statusText">System Online • Paper Trading Mode</span>
                     <div style="margin-top: 0.5rem;">
-                        <a href="/" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">📊 Dashboard</a>
+                        <a href="/" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">📊 Paper Trading</a>
+                        <a href="/broker-positions" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">🏛️ Broker Positions</a>
                         <a href="/rules" style="color: white; text-decoration: none; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">🤖 Rules Engine</a>
                     </div>
                 </div>
@@ -3539,6 +3547,909 @@ async fn deactivate_watchlist_symbol(
                 message: None,
                 error: Some("Database connection failed".to_string()),
             })
+        }
+    }
+}
+// =====================================
+// BROKER POSITION HANDLERS
+// =====================================
+
+// Broker positions HTML dashboard page
+async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html<String> {
+    let trading_mode = engine.get_trading_mode().await;
+
+    // Check if system is in PAPER mode - if so, return disabled page
+    if matches!(trading_mode, crate::config::TradingMode::Paper) {
+        return Html(format!(r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>🏛️ Lightspeed Broker Positions - DISABLED</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #636e72 0%, #2d3436 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        .header h1 {{ font-size: 1.8rem; margin-bottom: 0.5rem; }}
+        .header .subtitle {{ opacity: 0.9; font-size: 0.9rem; }}
+        .nav-back {{
+            margin-top: 1rem;
+        }}
+        .nav-back a {{
+            color: white;
+            text-decoration: none;
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: background 0.3s ease;
+        }}
+        .nav-back a:hover {{
+            background: rgba(255,255,255,0.3);
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }}
+        .disabled-card {{
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border: 3px solid #e17055;
+            text-align: center;
+        }}
+        .disabled-icon {{
+            font-size: 4rem;
+            color: #e17055;
+            margin-bottom: 1rem;
+        }}
+        .disabled-title {{
+            color: #e17055;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            font-weight: bold;
+        }}
+        .disabled-message {{
+            color: #636e72;
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }}
+        .mode-badge {{
+            display: inline-block;
+            background: #e17055;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }}
+        .instructions {{
+            background: #f8f9fa;
+            border-left: 4px solid #74b9ff;
+            padding: 1rem;
+            margin-top: 2rem;
+            border-radius: 0 8px 8px 0;
+        }}
+        .instructions h4 {{
+            color: #2d3436;
+            margin-bottom: 0.5rem;
+        }}
+        .instructions p {{
+            color: #636e72;
+            margin-bottom: 0.5rem;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏛️ Lightspeed Broker Positions</h1>
+        <p class="subtitle">Live broker position management interface</p>
+        <div class="nav-back">
+            <a href="/">← Back to Dashboard</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="disabled-card">
+            <div class="disabled-icon">🚫</div>
+            <div class="mode-badge">PAPER TRADING MODE</div>
+            <h2 class="disabled-title">Broker Functionality Disabled</h2>
+            <p class="disabled-message">
+                The broker positions page is disabled when the system is running in PAPER trading mode.
+                Broker functionality is only available in LIVE trading mode.
+            </p>
+
+            <div class="instructions">
+                <h4>📋 To Access Broker Functionality:</h4>
+                <p>• Switch the system to LIVE trading mode</p>
+                <p>• Configure your Lightspeed broker connection</p>
+                <p>• Restart the trading system</p>
+                <p>• Return to this page to view live broker positions</p>
+            </div>
+
+            <div class="instructions" style="border-left-color: #00b894; margin-top: 1rem;">
+                <h4>✅ Available in Paper Mode:</h4>
+                <p>• <a href="/" style="color: #00b894;">Main Dashboard</a> - View paper trading positions</p>
+                <p>• <a href="/rules" style="color: #00b894;">Rules Engine</a> - Configure trading rules</p>
+                <p>• All paper trading functionality remains available</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"#));
+    }
+
+    // Original page content for LIVE mode
+    Html(r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Lightspeed Broker Positions</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        .header {
+            background: linear-gradient(135deg, #4a90e2 0%, #2c5aa0 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .header h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+        .header .subtitle { opacity: 0.9; font-size: 0.9rem; }
+        .nav-back {
+            margin-top: 1rem;
+        }
+        .nav-back a {
+            color: white;
+            text-decoration: none;
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: background 0.3s ease;
+        }
+        .nav-back a:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border: 1px solid #e1e8ed;
+        }
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #ecf0f1;
+            font-size: 1.1rem;
+        }
+        .portfolio-summary { grid-column: 1 / -1; }
+        .portfolio-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .metric-card.cash { background: linear-gradient(135deg, #00b894 0%, #00a085 100%); }
+        .metric-card.exposure { background: linear-gradient(135deg, #fdcb6e 0%, #e17055 100%); }
+        .metric-card.positions { background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%); }
+        .metric-value { font-size: 1.5rem; font-weight: bold; }
+        .metric-label { font-size: 0.8rem; opacity: 0.9; }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-online { background: #00b894; }
+        .status-offline { background: #e17055; }
+        .positions-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        .positions-table th, .positions-table td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .positions-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .positions-table tr:hover {
+            background: #f8f9fa;
+        }
+        .loading {
+            text-align: center;
+            color: #74787e;
+            font-style: italic;
+        }
+        .error {
+            text-align: center;
+            color: #e17055;
+            background: #ffeaa7;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        .market-data {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .market-item {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+        .market-item .symbol { font-weight: bold; color: #2c3e50; }
+        .market-item .price { color: #74b9ff; font-weight: 600; }
+        .header-right {
+            position: absolute;
+            top: 1rem;
+            right: 2rem;
+            text-align: right;
+            font-size: 0.8rem;
+        }
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+            .portfolio-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ Lightspeed Broker Positions</h1>
+        <div class="subtitle">
+            <span>Live broker positions and portfolio data</span>
+            <div style="margin-top: 0.5rem;">
+                <a href="/" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">📊 Paper Trading</a>
+                <a href="/broker-positions" style="color: white; text-decoration: none; margin-right: 1rem; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.3); border-radius: 4px;">⚡ Lightspeed Broker</a>
+                <a href="/rules" style="color: white; text-decoration: none; padding: 0.25rem 0.75rem; background: rgba(255,255,255,0.1); border-radius: 4px;">🤖 Rules Engine</a>
+            </div>
+        </div>
+        <div class="header-right">
+            <div style="display: flex; align-items: center; margin-bottom: 0.25rem;">
+                <span id="statusDot" class="status-indicator status-online"></span>
+                <span id="statusText">System Online • LIVE Mode • Market: UNKNOWN</span>
+            </div>
+            <div id="systemVersion">v9.14.25</div>
+            <div id="systemClock" style="font-family: monospace; font-weight: bold;">--:--:-- EST</div>
+            <div id="dataDelay" style="font-size: 0.65rem; opacity: 0.7;">real-time</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Portfolio Summary Card -->
+        <div class="card portfolio-summary">
+            <h3>📊 Broker Portfolio Summary</h3>
+            <div class="portfolio-grid">
+                <div class="metric-card">
+                    <div class="metric-value" id="totalValue">-</div>
+                    <div class="metric-label">Total Value</div>
+                </div>
+                <div class="metric-card cash">
+                    <div class="metric-value" id="availableCash">-</div>
+                    <div class="metric-label">Available Cash</div>
+                </div>
+                <div class="metric-card exposure">
+                    <div class="metric-value" id="totalExposure">-</div>
+                    <div class="metric-label">Total Exposure</div>
+                </div>
+                <div class="metric-card positions">
+                    <div class="metric-value" id="positionCount">-</div>
+                    <div class="metric-label">Open Positions</div>
+                </div>
+            </div>
+
+            <!-- Market Status -->
+            <div class="market-data" id="marketData">
+                <div class="market-item">
+                    <div class="symbol">Market</div>
+                    <div class="price" id="marketStatus">CLOSED</div>
+                </div>
+                <div class="market-item">
+                    <div class="symbol">Lightspeed</div>
+                    <div class="price" id="lightspeedStatus">Disconnected</div>
+                </div>
+                <div class="market-item">
+                    <div class="symbol">Polygon WS</div>
+                    <div class="price" id="wsStatus">Connected</div>
+                </div>
+                <div class="market-item">
+                    <div class="symbol">Subscriptions</div>
+                    <div class="price" id="wsSubscriptions">0</div>
+                </div>
+            </div>
+
+            <div id="portfolioError" class="error" style="display: none;"></div>
+        </div>
+
+        <!-- Live Trading Interface -->
+        <div class="card">
+            <h3>🎯 Live Broker Trading</h3>
+            <form onsubmit="placeBrokerOrder(event)">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Symbol:</label>
+                        <input type="text" id="brokerSymbol" value="NVDA" required placeholder="e.g., NVDA, TSLA" style="width: 100%; padding: 0.75rem; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 0.9rem; transition: all 0.3s ease;">
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Side:</label>
+                        <select id="brokerSide" required style="width: 100%; padding: 0.75rem; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 0.9rem; transition: all 0.3s ease;">
+                            <option value="BUY">BUY</option>
+                            <option value="SELL">SELL</option>
+                            <option value="SELL_SHORT">SELL SHORT</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Order Type:</label>
+                        <select id="brokerOrderType" required onchange="toggleBrokerPrice()" style="width: 100%; padding: 0.75rem; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 0.9rem; transition: all 0.3s ease;">
+                            <option value="MARKET">MARKET</option>
+                            <option value="LIMIT">LIMIT</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Quantity:</label>
+                        <input type="number" id="brokerQuantity" value="10" min="1" required style="width: 100%; padding: 0.75rem; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 0.9rem; transition: all 0.3s ease;">
+                    </div>
+                    <div id="brokerPriceGroup" style="display: none; margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Limit Price:</label>
+                        <input type="number" id="brokerPrice" value="150.00" step="0.01" min="0" style="width: 100%; padding: 0.75rem; border: 2px solid #ecf0f1; border-radius: 8px; font-size: 0.9rem; transition: all 0.3s ease;">
+                    </div>
+                </div>
+                <button type="submit" style="background: linear-gradient(135deg, #fd79a8 0%, #e84393 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(253, 121, 168, 0.3); margin-right: 0.5rem;">Place Live Order</button>
+                <button type="button" onclick="getBrokerQuote()" style="background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(162, 155, 254, 0.3);">Get Quote</button>
+            </form>
+            <div id="brokerResult" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Live Positions -->
+        <div class="card">
+            <h3>🔄 Live Broker Positions</h3>
+            <div id="positionsLoading" class="loading">Loading positions...</div>
+            <div id="positionsError" class="error" style="display: none;"></div>
+            <table class="positions-table" id="positionsTable" style="display: none;">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Avg Price</th>
+                        <th>Current Price</th>
+                        <th>Market Value</th>
+                        <th>Unrealized P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="positionsBody">
+                </tbody>
+            </table>
+            <div id="noPositions" style="display: none; text-align: center; color: #74787e; padding: 2rem;">
+                No active broker positions
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Auto-refresh data every 30 seconds
+        setInterval(() => {
+            loadBrokerPortfolio();
+            loadBrokerPositions();
+            loadBrokerStatus();
+        }, 30000);
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadBrokerPortfolio();
+            loadBrokerPositions();
+            loadBrokerStatus();
+        });
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(value);
+        }
+
+        async function loadBrokerPortfolio() {
+            try {
+                const response = await fetch('/api/broker/portfolio');
+                const data = await response.json();
+
+                if (data.success && data.portfolio) {
+                    const portfolio = data.portfolio;
+                    document.getElementById('totalValue').textContent = formatCurrency(portfolio.total_value);
+                    document.getElementById('availableCash').textContent = formatCurrency(portfolio.available_cash);
+                    document.getElementById('totalExposure').textContent = formatCurrency(portfolio.total_exposure);
+                    document.getElementById('positionCount').textContent = portfolio.position_count;
+                    document.getElementById('portfolioError').style.display = 'none';
+                } else {
+                    document.getElementById('portfolioError').textContent = data.error || 'Failed to load portfolio data';
+                    document.getElementById('portfolioError').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('portfolioError').textContent = 'Error loading portfolio data';
+                document.getElementById('portfolioError').style.display = 'block';
+                console.error('Failed to load portfolio:', error);
+            }
+        }
+
+        async function loadBrokerPositions() {
+            const loading = document.getElementById('positionsLoading');
+            const error = document.getElementById('positionsError');
+            const table = document.getElementById('positionsTable');
+            const body = document.getElementById('positionsBody');
+            const noPositions = document.getElementById('noPositions');
+
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            noPositions.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/broker/positions');
+                const data = await response.json();
+
+                loading.style.display = 'none';
+
+                if (data.success && data.positions && Object.keys(data.positions).length > 0) {
+                    body.innerHTML = '';
+
+                    Object.entries(data.positions).forEach(([symbol, position]) => {
+                        const row = document.createElement('tr');
+                        const marketValue = position.current_price * position.quantity;
+                        const unrealizedPnL = marketValue - (position.avg_cost_basis * position.quantity);
+                        const pnlClass = unrealizedPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+
+                        row.innerHTML = `
+                            <td><strong>${symbol}</strong></td>
+                            <td>${position.quantity}</td>
+                            <td>${formatCurrency(position.avg_cost_basis)}</td>
+                            <td>${formatCurrency(position.current_price)}</td>
+                            <td>${formatCurrency(marketValue)}</td>
+                            <td style="${pnlClass}">${formatCurrency(unrealizedPnL)}</td>
+                        `;
+                        body.appendChild(row);
+                    });
+
+                    table.style.display = 'table';
+                } else if (data.success) {
+                    noPositions.style.display = 'block';
+                } else {
+                    error.textContent = data.error || 'Failed to load positions';
+                    error.style.display = 'block';
+                }
+            } catch (err) {
+                loading.style.display = 'none';
+                error.textContent = 'Error loading positions';
+                error.style.display = 'block';
+                console.error('Failed to load positions:', err);
+            }
+        }
+
+        async function loadBrokerStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update the Lightspeed status in the top summary
+                if (data.broker_connected) {
+                    document.getElementById('lightspeedStatus').textContent = 'Connected';
+                } else {
+                    document.getElementById('lightspeedStatus').textContent = 'Disconnected';
+                }
+            } catch (error) {
+                // Update status to show error
+                document.getElementById('lightspeedStatus').textContent = 'Error';
+                console.error('Failed to load broker status:', error);
+            }
+        }
+
+        function toggleBrokerPrice() {
+            const orderType = document.getElementById('brokerOrderType').value;
+            const priceGroup = document.getElementById('brokerPriceGroup');
+            priceGroup.style.display = orderType === 'LIMIT' ? 'block' : 'none';
+        }
+
+        async function placeBrokerOrder(event) {
+            event.preventDefault();
+
+            const symbol = document.getElementById('brokerSymbol').value.toUpperCase();
+            const side = document.getElementById('brokerSide').value;
+            const orderType = document.getElementById('brokerOrderType').value;
+            const quantity = parseInt(document.getElementById('brokerQuantity').value);
+            const price = orderType === 'LIMIT' ? parseFloat(document.getElementById('brokerPrice').value) : null;
+
+            if (!symbol || !side || !quantity) {
+                showBrokerResult('❌ Please fill in all required fields', 'error');
+                return;
+            }
+
+            const orderData = {
+                symbol: symbol,
+                side: side,
+                order_type: orderType,
+                quantity: quantity,
+                price: price
+            };
+
+            showBrokerResult(`📤 Placing ${side} order for ${quantity} ${symbol}...`, 'info');
+
+            try {
+                const response = await fetch('/api/order', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(orderData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showBrokerResult(`✅ Live order executed! Order ID: ${result.order_id}`, 'success');
+                    setTimeout(() => {
+                        loadBrokerPortfolio();
+                        loadBrokerPositions();
+                    }, 1000);
+                } else {
+                    showBrokerResult(`❌ Order failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showBrokerResult(`❌ Request failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function getBrokerQuote() {
+            const symbol = document.getElementById('brokerSymbol').value.toUpperCase();
+            if (!symbol) return;
+
+            showBrokerResult(`📊 Getting quote for ${symbol}...`, 'info');
+
+            try {
+                const response = await fetch(`/api/snapshot/${symbol}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    const data = result.data;
+                    showBrokerResult(`📊 ${symbol}: $${data.close} (${data.change_percent >= 0 ? '+' : ''}${data.change_percent.toFixed(2)}%)`, 'success');
+                } else {
+                    showBrokerResult(`❌ Failed to get quote: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showBrokerResult(`❌ Quote request failed: ${error.message}`, 'error');
+            }
+        }
+
+        function showBrokerResult(message, type) {
+            const result = document.getElementById('brokerResult');
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            result.innerHTML = `<div class="${className}" style="padding: 1rem; border-radius: 8px; font-weight: 500; ${
+                type === 'success' ? 'background: #d1f2eb; color: #00a085; border-left: 4px solid #00b894;' :
+                type === 'error' ? 'background: #ffeaa7; color: #e17055; border-left: 4px solid #e17055;' :
+                'background: #ddd6fe; color: #6c5ce7; border-left: 4px solid #a29bfe;'
+            }">${message}</div>`;
+
+            // Auto-hide after 5 seconds for non-error messages
+            if (type !== 'error') {
+                setTimeout(() => {
+                    result.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // Clock and Status Functions
+        function initializeClock() {
+            updateClock(); // Set immediately
+            setInterval(updateClock, 1000); // Update every second
+        }
+
+        function updateClock() {
+            try {
+                // Get current UTC time and convert to Eastern Time
+                const now = new Date();
+                const utc = new Date(now.getTime() + (now.getTimezoneOffset() * 60000));
+
+                // Calculate Eastern Time (EST/EDT)
+                const easternOffset = isDST(now) ? -4 : -5; // EDT = -4, EST = -5
+                const eastern = new Date(utc.getTime() + (easternOffset * 3600000));
+
+                // Apply data delay using cached value
+                const displayTime = new Date(eastern.getTime() - (cachedDataDelay * 60000));
+
+                // Format time
+                const timeString = displayTime.toLocaleTimeString('en-US', {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+
+                const timezone = isDST(now) ? 'EDT' : 'EST';
+                document.getElementById('systemClock').textContent = `${timeString} ${timezone}`;
+
+            } catch (error) {
+                // Fallback to local time if API fails
+                const now = new Date();
+                document.getElementById('systemClock').textContent =
+                    now.toLocaleTimeString('en-US', { hour12: false }) + ' LOCAL';
+            }
+        }
+
+        function isDST(date) {
+            // Simple DST check for US Eastern Time
+            const year = date.getFullYear();
+
+            // DST starts second Sunday in March
+            const dstStart = new Date(year, 2, 14 - new Date(year, 2, 1).getDay());
+
+            // DST ends first Sunday in November
+            const dstEnd = new Date(year, 10, 7 - new Date(year, 10, 1).getDay());
+
+            return date >= dstStart && date < dstEnd;
+        }
+
+        async function loadSystemStatus() {
+            try {
+                const [marketResp, wsResp, modeResp, versionResp] = await Promise.all([
+                    fetch('/api/market/status'),
+                    fetch('/api/websocket/status'),
+                    fetch('/api/system/mode'),
+                    fetch('/api/system/version')
+                ]);
+
+                const marketData = await marketResp.json();
+                const wsData = await wsResp.json();
+                const modeData = await modeResp.json();
+                const versionData = await versionResp.json();
+
+                if (marketData.success) {
+                    document.getElementById('marketStatus').textContent = marketData.status || 'UNKNOWN';
+                }
+
+                if (wsData.success) {
+                    document.getElementById('wsStatus').textContent = wsData.websocket_enabled ? 'Connected' : 'Disconnected';
+                    document.getElementById('wsSubscriptions').textContent = wsData.subscriptions_count || 0;
+                }
+
+                // Update lightspeed status based on broker connection (placeholder for now)
+                document.getElementById('lightspeedStatus').textContent = 'Checking...';
+
+                // Update system status line with trading mode
+                if (modeData.success) {
+                    const statusText = document.getElementById('statusText');
+                    const statusDot = document.getElementById('statusDot');
+                    const mode = modeData.mode || 'UNKNOWN';
+                    const marketStatus = marketData.success ? marketData.status : 'UNKNOWN';
+
+                    statusText.textContent = `System Online • ${mode} Mode • Market: ${marketStatus}`;
+
+                    // Update status indicator color based on mode
+                    statusDot.className = mode === 'LIVE' ? 'status-indicator status-online' : 'status-indicator status-online';
+                }
+
+                // Update version and data delay
+                if (versionData.success) {
+                    document.getElementById('systemVersion').textContent = versionData.version || 'v9.14.25';
+
+                    const delayElement = document.getElementById('dataDelay');
+                    if (versionData.data_delay_minutes && versionData.data_delay_minutes > 0) {
+                        cachedDataDelay = versionData.data_delay_minutes;
+                        delayElement.textContent = `${versionData.data_delay_minutes}min delayed`;
+                        delayElement.style.display = 'block';
+                    } else {
+                        cachedDataDelay = 0;
+                        delayElement.textContent = 'real-time';
+                        delayElement.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load system status:', error);
+            }
+        }
+
+        // Global variable for data delay
+        let cachedDataDelay = 0;
+
+        // Initialize everything when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeClock();
+            loadSystemStatus();
+            loadPortfolioData();
+
+            // Refresh status every 30 seconds
+            setInterval(loadSystemStatus, 30000);
+        });
+    </script>
+</body>
+</html>"#.to_string())
+}
+
+// Get broker positions API endpoint
+async fn get_broker_positions(State(engine): State<Arc<TradingEngine>>) -> Json<PositionsResponse> {
+    tracing::info!("🏛️ Broker positions request");
+
+    // Check trading mode - block broker functionality in PAPER mode
+    let trading_mode = engine.get_trading_mode().await;
+    if matches!(trading_mode, crate::config::TradingMode::Paper) {
+        tracing::warn!("🚫 Broker positions request blocked - system is in PAPER trading mode");
+        return Json(PositionsResponse {
+            success: false,
+            positions: None,
+            error: Some("Broker functionality is disabled in PAPER trading mode. Only LIVE trading mode provides access to broker positions.".to_string()),
+        });
+    }
+
+    let broker_module = engine.get_broker_module().await;
+
+    // Only get positions from live broker (Lightspeed) - no fallback to paper trading
+    match broker_module.get_live_positions("lightspeed").await {
+        Ok(positions) => {
+            tracing::info!("✅ Retrieved {} positions from Lightspeed broker", positions.len());
+            Json(PositionsResponse {
+                success: true,
+                positions: Some(positions),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ No live broker positions available: {}", e);
+            // Return empty positions - do not fall back to paper trading data
+            Json(PositionsResponse {
+                success: true,
+                positions: Some(std::collections::HashMap::new()),
+                error: None,
+            })
+        }
+    }
+}
+
+// Get broker portfolio API endpoint
+async fn get_broker_portfolio(State(engine): State<Arc<TradingEngine>>) -> Json<PortfolioResponse> {
+    tracing::info!("🏛️ Broker portfolio request");
+
+    // Check trading mode - block broker functionality in PAPER mode
+    let trading_mode = engine.get_trading_mode().await;
+    if matches!(trading_mode, crate::config::TradingMode::Paper) {
+        tracing::warn!("🚫 Broker portfolio request blocked - system is in PAPER trading mode");
+        return Json(PortfolioResponse {
+            success: false,
+            portfolio: None,
+            error: Some("Broker functionality is disabled in PAPER trading mode. Only LIVE trading mode provides access to broker portfolio data.".to_string()),
+        });
+    }
+
+    let broker_module = engine.get_broker_module().await;
+
+    // Try to get portfolio data from live broker only
+    match broker_module.get_portfolio_snapshot().await {
+        Ok(portfolio_state) => {
+            // Use broker portfolio data
+            let portfolio_summary = PortfolioSummary {
+                total_value: portfolio_state.total_value,
+                available_cash: portfolio_state.available_cash,
+                total_exposure: portfolio_state.total_exposure,
+                position_count: portfolio_state.current_position_count as usize,
+                positions: portfolio_state.positions,
+                last_updated: portfolio_state.last_updated.to_rfc3339(),
+            };
+
+            tracing::info!("✅ Broker portfolio from broker module: ${:.2} total, ${:.2} cash, {} positions",
+                portfolio_summary.total_value, portfolio_summary.available_cash, portfolio_summary.position_count);
+
+            Json(PortfolioResponse {
+                success: true,
+                portfolio: Some(portfolio_summary),
+                error: None,
+            })
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ No live broker portfolio available, calculating from live positions: {}", e);
+
+            // Fallback to live broker positions calculation only - no paper trading data
+            match broker_module.get_live_positions("lightspeed").await {
+                Ok(positions) => {
+                    // Calculate portfolio summary from live broker positions only
+                    let mut position_value = 0.0;
+                    let mut total_exposure = 0.0;
+
+                    for position in positions.values() {
+                        let value = position.current_price * position.quantity as f64;
+                        position_value += value;
+                        total_exposure += value;
+                    }
+
+                    // Default values when no live broker connection
+                    let available_cash = if total_exposure > 0.0 { 100000.0 - total_exposure } else { 0.0 };
+
+                    let portfolio_summary = PortfolioSummary {
+                        total_value: available_cash + position_value,
+                        available_cash,
+                        total_exposure,
+                        position_count: positions.len(),
+                        positions: positions.clone(),
+                        last_updated: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    tracing::info!("✅ Broker portfolio calculated from live positions: ${:.2} total, {} positions",
+                        portfolio_summary.total_value, portfolio_summary.position_count);
+
+                    Json(PortfolioResponse {
+                        success: true,
+                        portfolio: Some(portfolio_summary),
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    tracing::warn!("❌ No live broker connection available: {}", e);
+                    // Return empty portfolio when no live broker is connected
+                    let empty_portfolio = PortfolioSummary {
+                        total_value: 0.0,
+                        available_cash: 0.0,
+                        total_exposure: 0.0,
+                        position_count: 0,
+                        positions: std::collections::HashMap::new(),
+                        last_updated: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    Json(PortfolioResponse {
+                        success: true,
+                        portfolio: Some(empty_portfolio),
+                        error: None,
+                    })
+                }
+            }
         }
     }
 }
