@@ -1,7 +1,7 @@
 # Cargo.toml
 [package]
 name = "trading-system"
-version = "9.11.25"
+version = "9.14.25"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "High-performance algorithmic trading system"
@@ -9,6 +9,7 @@ description = "High-performance algorithmic trading system"
 [dependencies]
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1.14"
 async-trait = "0.1.73"
 
 # Database - using older compatible version

@@ -2,7 +2,7 @@
 use anyhow::Result;
 use axum::{
     extract::{Path, Query, State},
-    response::{Html, Json},
+    response::{Html, Json, Sse, sse::Event},
     routing::{delete, get, post},
     Router,
 };
@@ -10,9 +10,12 @@ use tower_http::services::ServeDir;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
+use futures_util::stream::{Stream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::engine::TradingEngine;
 use crate::data::{SymbolDataResponse, MarketMoverData, MarketSnapshotTicker, DailyMarketSummaryTicker};
 use crate::types::{Position, RiskParameters};
+use crate::broker::lightspeed::BrokerEvent;
 // use crate::broker::paper::{PaperSession, PaperTrade};  // TODO: Enable when paper broker implemented
 
 mod rules;
@@ -359,6 +362,7 @@ pub async fn start_server(bind_address: String, engine: Arc<TradingEngine>) -> R
         .route("/api/portfolio", get(get_portfolio))
         .route("/api/broker/positions", get(get_broker_positions))
         .route("/api/broker/portfolio", get(get_broker_portfolio))
+        .route("/api/broker/events", get(broker_events_sse))
         // Risk Configuration endpoints
         .route("/api/risk", get(get_risk_config))
         .route("/api/risk", post(update_risk_config))
@@ -2069,6 +2073,10 @@ async fn place_order(
     ).await {
         Ok(order_id) => {
             tracing::info!("✅ Order placed successfully: {}", order_id);
+
+            // TODO: Add order submission event to SSE stream for immediate feedback
+            // This would require access to the SSE broadcast channel
+
             Json(OrderResponse {
                 success: true,
                 order_id: Some(order_id),
@@ -3843,6 +3851,17 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
                 grid-template-columns: 1fr 1fr;
             }
         }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
     </style>
 </head>
 <body>
@@ -3952,27 +3971,53 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
             <div id="brokerResult" style="margin-top: 1rem;"></div>
         </div>
 
-        <!-- Live Positions -->
+        <!-- Order Status Log -->
         <div class="card">
-            <h3>🔄 Live Broker Positions</h3>
+            <h3>📋 Order Status Log</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div style="font-size: 0.9rem; color: #636e72;">Real-time order execution tracking</div>
+                <button type="button" onclick="clearOrderLog()" style="background: #ddd; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.8rem; cursor: pointer;">Clear Log</button>
+            </div>
+            <div id="orderStatusLog" style="
+                max-height: 300px;
+                overflow-y: auto;
+                border: 2px solid #ecf0f1;
+                border-radius: 8px;
+                padding: 1rem;
+                background: #f8f9fa;
+                font-family: 'Courier New', monospace;
+                font-size: 0.85rem;
+                line-height: 1.4;
+            ">
+                <div class="order-log-entry" style="color: #74787e; font-style: italic; text-align: center; padding: 2rem;">
+                    Order status updates will appear here...
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Broker Positions -->
+        <div class="card">
+            <h3>📈 Live Broker Positions</h3>
             <div id="positionsLoading" class="loading">Loading positions...</div>
             <div id="positionsError" class="error" style="display: none;"></div>
-            <table class="positions-table" id="positionsTable" style="display: none;">
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>Quantity</th>
-                        <th>Avg Price</th>
-                        <th>Current Price</th>
-                        <th>Market Value</th>
-                        <th>Unrealized P&L</th>
-                    </tr>
-                </thead>
-                <tbody id="positionsBody">
-                </tbody>
-            </table>
-            <div id="noPositions" style="display: none; text-align: center; color: #74787e; padding: 2rem;">
-                No active broker positions
+            <div id="positionsContent" style="display: none;">
+                <table class="positions-table" id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Position Size</th>
+                            <th>Avg Cost Basis</th>
+                            <th>Current Price</th>
+                            <th>Market Value</th>
+                            <th>Unrealized P&L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionsBody">
+                    </tbody>
+                </table>
+                <div id="noPositions" style="text-align: center; padding: 2rem; color: #74787e;">
+                    No active broker positions
+                </div>
             </div>
         </div>
 
@@ -3991,6 +4036,7 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
             loadBrokerPortfolio();
             loadBrokerPositions();
             loadBrokerStatus();
+            initializeBrokerEventStream();
         });
 
         function formatCurrency(value) {
@@ -4028,14 +4074,14 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
         async function loadBrokerPositions() {
             const loading = document.getElementById('positionsLoading');
             const error = document.getElementById('positionsError');
+            const content = document.getElementById('positionsContent');
             const table = document.getElementById('positionsTable');
             const body = document.getElementById('positionsBody');
             const noPositions = document.getElementById('noPositions');
 
             loading.style.display = 'block';
             error.style.display = 'none';
-            table.style.display = 'none';
-            noPositions.style.display = 'none';
+            content.style.display = 'none';
 
             try {
                 const response = await fetch('/api/broker/positions');
@@ -4049,23 +4095,45 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
                     Object.entries(data.positions).forEach(([symbol, position]) => {
                         const row = document.createElement('tr');
                         const marketValue = position.current_price * position.quantity;
-                        const unrealizedPnL = marketValue - (position.avg_cost_basis * position.quantity);
+                        const totalCost = position.avg_cost_basis * Math.abs(position.quantity);
+                        const unrealizedPnL = marketValue - totalCost;
                         const pnlClass = unrealizedPnL >= 0 ? 'color: #00b894' : 'color: #e17055';
+
+                        // Format position size similar to paper trading
+                        let positionDisplay = '';
+                        if (position.quantity > 0) {
+                            positionDisplay = `+${position.quantity}`;
+                        } else {
+                            positionDisplay = `${position.quantity}`;
+                        }
 
                         row.innerHTML = `
                             <td><strong>${symbol}</strong></td>
-                            <td>${position.quantity}</td>
+                            <td style="font-weight: 600;">${positionDisplay}</td>
                             <td>${formatCurrency(position.avg_cost_basis)}</td>
                             <td>${formatCurrency(position.current_price)}</td>
-                            <td>${formatCurrency(marketValue)}</td>
-                            <td style="${pnlClass}">${formatCurrency(unrealizedPnL)}</td>
+                            <td>${formatCurrency(Math.abs(marketValue))}</td>
+                            <td style="${pnlClass}; font-weight: 600;">${formatCurrency(unrealizedPnL)}</td>
                         `;
+
+                        // Add hover effect
+                        row.addEventListener('mouseenter', function() {
+                            this.style.backgroundColor = '#f8f9fa';
+                        });
+                        row.addEventListener('mouseleave', function() {
+                            this.style.backgroundColor = '';
+                        });
+
                         body.appendChild(row);
                     });
 
                     table.style.display = 'table';
+                    noPositions.style.display = 'none';
+                    content.style.display = 'block';
                 } else if (data.success) {
+                    table.style.display = 'none';
                     noPositions.style.display = 'block';
+                    content.style.display = 'block';
                 } else {
                     error.textContent = data.error || 'Failed to load positions';
                     error.style.display = 'block';
@@ -4138,16 +4206,19 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
                 const result = await response.json();
 
                 if (result.success) {
-                    showBrokerResult(`✅ Live order executed! Order ID: ${result.order_id}`, 'success');
+                    showBrokerResult(`✅ Order submitted! Order ID: ${result.order_id}`, 'success');
+                    addOrderStatusLog(`📤 Order submitted to broker: ${result.order_id}`, 'submitted');
                     setTimeout(() => {
                         loadBrokerPortfolio();
                         loadBrokerPositions();
                     }, 1000);
                 } else {
                     showBrokerResult(`❌ Order failed: ${result.error}`, 'error');
+                    addOrderStatusLog(`❌ Order rejected: ${result.error}`, 'rejected');
                 }
             } catch (error) {
                 showBrokerResult(`❌ Request failed: ${error.message}`, 'error');
+                addOrderStatusLog(`⚠️ Order submission failed: ${error.message}`, 'error');
             }
         }
 
@@ -4186,6 +4257,168 @@ async fn broker_positions_page(State(engine): State<Arc<TradingEngine>>) -> Html
                 setTimeout(() => {
                     result.innerHTML = '';
                 }, 5000);
+            }
+        }
+
+        // Order Status Log Functions
+        function addOrderStatusLog(message, status = 'info') {
+            const log = document.getElementById('orderStatusLog');
+            const timestamp = new Date().toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+
+            // Remove placeholder text if it exists
+            if (log.querySelector('.order-log-entry')) {
+                const placeholder = log.querySelector('.order-log-entry');
+                if (placeholder.textContent.includes('Order status updates will appear here')) {
+                    log.innerHTML = '';
+                }
+            }
+
+            const statusColors = {
+                'submitted': '#74b9ff',
+                'pending': '#fdcb6e',
+                'filled': '#00b894',
+                'rejected': '#e17055',
+                'canceled': '#636e72',
+                'error': '#e17055',
+                'info': '#a29bfe'
+            };
+
+            const entry = document.createElement('div');
+            entry.style.cssText = `
+                margin-bottom: 0.5rem;
+                padding: 0.5rem;
+                border-left: 4px solid ${statusColors[status] || statusColors.info};
+                background: white;
+                border-radius: 4px;
+                animation: slideIn 0.3s ease-out;
+            `;
+
+            entry.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div style="flex: 1;">
+                        <span style="color: ${statusColors[status] || statusColors.info}; font-weight: bold; text-transform: uppercase; font-size: 0.75rem;">
+                            [${status.toUpperCase()}]
+                        </span>
+                        <span style="margin-left: 0.5rem; color: #2c3e50;">${message}</span>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #74787e; margin-left: 1rem; white-space: nowrap;">
+                        ${timestamp}
+                    </div>
+                </div>
+            `;
+
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight; // Auto-scroll to bottom
+
+            // Limit to 100 entries to prevent memory issues
+            while (log.children.length > 100) {
+                log.removeChild(log.firstChild);
+            }
+        }
+
+        function clearOrderLog() {
+            const log = document.getElementById('orderStatusLog');
+            log.innerHTML = '<div class="order-log-entry" style="color: #74787e; font-style: italic; text-align: center; padding: 2rem;">Order status updates will appear here...</div>';
+        }
+
+        function updateOrderStatus(orderId, status, details = '') {
+            let message = `Order ${orderId}: ${status.toUpperCase()}`;
+            if (details) {
+                message += ` - ${details}`;
+            }
+            addOrderStatusLog(message, status.toLowerCase());
+        }
+
+        function initializeBrokerEventStream() {
+            try {
+                const eventSource = new EventSource('/api/broker/events');
+
+                eventSource.onopen = function(e) {
+                    addOrderStatusLog('📡 Connected to real-time broker events', 'info');
+                };
+
+                eventSource.onmessage = function(e) {
+                    addOrderStatusLog(`Received event: ${e.data}`, 'info');
+                };
+
+                eventSource.addEventListener('connected', function(e) {
+                    addOrderStatusLog('Broker connected', 'info');
+                });
+
+                eventSource.addEventListener('disconnected', function(e) {
+                    addOrderStatusLog('Broker disconnected', 'error');
+                });
+
+                eventSource.addEventListener('order_ack', function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        addOrderStatusLog(`Order acknowledged: ${data.order_id} (Client: ${data.client_order_id})`, 'pending');
+                    } catch (error) {
+                        addOrderStatusLog('Order acknowledged', 'pending');
+                    }
+                });
+
+                eventSource.addEventListener('order_fill', function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        const fillType = data.is_partial_fill ? 'PARTIAL' : 'COMPLETE';
+                        let message = `Order ${fillType} fill: ${data.quantity} shares of ${data.symbol} at $${data.price} (${data.side})`;
+
+                        // Add cumulative information for partial fills
+                        if (data.is_partial_fill) {
+                            message += ` - Progress: ${data.cumulative_qty}/${data.order_qty} shares (${data.remaining_qty} remaining)`;
+                            addOrderStatusLog(message, 'pending'); // Use 'pending' status for partial fills
+                        } else {
+                            message += ` - Order complete: ${data.cumulative_qty}/${data.order_qty} shares`;
+                            addOrderStatusLog(message, 'filled'); // Use 'filled' status for complete fills
+                        }
+
+                        // Refresh positions and portfolio after fill
+                        setTimeout(() => {
+                            loadBrokerPositions();
+                            loadBrokerPortfolio();
+                        }, 1000);
+                    } catch (error) {
+                        addOrderStatusLog('Order filled', 'filled');
+
+                        // Still refresh positions even if we can't parse data
+                        setTimeout(() => {
+                            loadBrokerPositions();
+                            loadBrokerPortfolio();
+                        }, 1000);
+                    }
+                });
+
+                eventSource.addEventListener('order_reject', function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        addOrderStatusLog(`Order rejected: ${data.reason} (Client: ${data.client_order_id})`, 'rejected');
+                    } catch (error) {
+                        addOrderStatusLog('Order rejected', 'rejected');
+                    }
+                });
+
+                eventSource.addEventListener('error', function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        addOrderStatusLog(`Broker error: ${data.message}`, 'error');
+                    } catch (error) {
+                        addOrderStatusLog('Broker connection error', 'error');
+                    }
+                });
+
+                eventSource.onerror = function(e) {
+                    addOrderStatusLog('Connection error - retrying...', 'error');
+                    // EventSource will automatically try to reconnect
+                };
+
+            } catch (error) {
+                addOrderStatusLog(`Failed to initialize event stream: ${error.message}`, 'error');
             }
         }
 
@@ -4333,10 +4566,10 @@ async fn get_broker_positions(State(engine): State<Arc<TradingEngine>>) -> Json<
 
     let broker_module = engine.get_broker_module().await;
 
-    // Only get positions from live broker (Lightspeed) - no fallback to paper trading
-    match broker_module.get_live_positions("lightspeed").await {
+    // Get real-time positions from broker memory (not database)
+    match broker_module.get_positions().await {
         Ok(positions) => {
-            tracing::info!("✅ Retrieved {} positions from Lightspeed broker", positions.len());
+            tracing::info!("✅ Retrieved {} real-time positions from broker", positions.len());
             Json(PositionsResponse {
                 success: true,
                 positions: Some(positions),
@@ -4344,8 +4577,8 @@ async fn get_broker_positions(State(engine): State<Arc<TradingEngine>>) -> Json<
             })
         }
         Err(e) => {
-            tracing::warn!("⚠️ No live broker positions available: {}", e);
-            // Return empty positions - do not fall back to paper trading data
+            tracing::warn!("⚠️ No broker positions available: {}", e);
+            // Return empty positions
             Json(PositionsResponse {
                 success: true,
                 positions: Some(std::collections::HashMap::new()),
@@ -4450,6 +4683,114 @@ async fn get_broker_portfolio(State(engine): State<Arc<TradingEngine>>) -> Json<
                     })
                 }
             }
+        }
+    }
+}
+
+// Server-Sent Events handler for real-time broker order updates
+async fn broker_events_sse(
+    State(engine): State<Arc<TradingEngine>>
+) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, Json<serde_json::Value>> {
+    tracing::info!("🔄 Client connected to broker events SSE stream");
+
+    // Check trading mode - block broker functionality in PAPER mode
+    let trading_mode = engine.get_trading_mode().await;
+    if matches!(trading_mode, crate::config::TradingMode::Paper) {
+        tracing::warn!("🚫 Broker events SSE blocked - system is in PAPER trading mode");
+        return Err(Json(serde_json::json!({
+            "error": "Broker events are disabled in PAPER trading mode. Only LIVE trading mode provides real-time broker updates."
+        })));
+    }
+
+    let broker_module = engine.get_broker_module().await;
+
+    // Get broker event stream
+    match broker_module.get_broker_events().await {
+        Ok(event_receiver) => {
+            use tokio_stream::StreamExt;
+
+            let stream = UnboundedReceiverStream::new(event_receiver)
+                .map(|event| {
+                    let event_data = match event {
+                        BrokerEvent::Connected => {
+                            Event::default()
+                                .event("connected")
+                                .data("Broker connected")
+                        }
+                        BrokerEvent::Disconnected => {
+                            Event::default()
+                                .event("disconnected")
+                                .data("Broker disconnected")
+                        }
+                        BrokerEvent::OrderAck { client_order_id, order_id } => {
+                            let data = serde_json::json!({
+                                "client_order_id": client_order_id,
+                                "order_id": order_id,
+                                "status": "acknowledged"
+                            });
+                            Event::default()
+                                .event("order_ack")
+                                .data(data.to_string())
+                        }
+                        BrokerEvent::OrderFill {
+                            client_order_id,
+                            symbol,
+                            side,
+                            qty,
+                            price,
+                            cumulative_qty,
+                            remaining_qty,
+                            order_qty,
+                            is_partial_fill
+                        } => {
+                            let status = if is_partial_fill { "partial_fill" } else { "filled" };
+                            let data = serde_json::json!({
+                                "client_order_id": client_order_id,
+                                "symbol": symbol,
+                                "side": side,
+                                "quantity": qty,
+                                "price": price,
+                                "cumulative_qty": cumulative_qty,
+                                "remaining_qty": remaining_qty,
+                                "order_qty": order_qty,
+                                "is_partial_fill": is_partial_fill,
+                                "status": status
+                            });
+                            Event::default()
+                                .event("order_fill")
+                                .data(data.to_string())
+                        }
+                        BrokerEvent::OrderReject { client_order_id, reason } => {
+                            let data = serde_json::json!({
+                                "client_order_id": client_order_id,
+                                "reason": reason,
+                                "status": "rejected"
+                            });
+                            Event::default()
+                                .event("order_reject")
+                                .data(data.to_string())
+                        }
+                        BrokerEvent::Error { message } => {
+                            let data = serde_json::json!({
+                                "message": message,
+                                "type": "broker_error"
+                            });
+                            Event::default()
+                                .event("error")
+                                .data(data.to_string())
+                        }
+                    };
+                    Ok::<Event, std::convert::Infallible>(event_data)
+                });
+
+            tracing::info!("📡 Started SSE stream for broker events");
+            Ok(Sse::new(stream))
+        }
+        Err(e) => {
+            tracing::error!("❌ Failed to get broker events: {}", e);
+            Err(Json(serde_json::json!({
+                "error": format!("Failed to connect to broker events: {}", e)
+            })))
         }
     }
 }

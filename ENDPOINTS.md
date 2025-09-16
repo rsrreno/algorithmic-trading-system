@@ -1,7 +1,7 @@
 # API Endpoints Documentation
 
-**Project Version:** v8.28.25  
-**Last Updated:** 2025-09-02  
+**Project Version:** v9.14.25
+**Last Updated:** 2025-09-16  
 **Related Files:** `CLAUDE.md`, `STATUS.md`, `README.md`
 
 This document contains a comprehensive inventory of all external API endpoints used by the trading system, their current implementation status, and related documentation links.

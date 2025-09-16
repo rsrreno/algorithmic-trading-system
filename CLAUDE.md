@@ -1,7 +1,7 @@
 # Claude Code Development Guidelines
 
-**Project Version:** v9.11.25  
-**Last Updated:** 2025-09-12 - **ENHANCED POSITION TRACKING IMPLEMENTATION**: Complete redesign with weighted average cost basis, database-direct sell processing, and cumulative realized P&L display  
+**Project Version:** v9.14.25
+**Last Updated:** 2025-09-16 - **BROKER PAGE ENHANCEMENTS**: Added real-time order tracking, Server-Sent Events for live broker updates, enhanced position display with cumulative P&L, and comprehensive order status logging  
 **Related Files:** `STATUS.md`, `README.md`
 
 **Documentation Organization**:
@@ -240,5 +240,5 @@ When the user says "claude commit" or "update docs and commit" at the end of a d
 - **Documentation commits**: Include Claude Code attribution when appropriate
 
 ---
-**Git Branch:** `9.11.25` | **Development Phase:** Enhanced Position Tracking System Implementation
+**Git Branch:** `9.14.25` | **Development Phase:** Real-time Broker Interface Implementation
 - #1- use the same database but create new tables, views, indexes etc. as needed.  #2 - I'm not sure yet, we will have to do some testing during market hours.  #3 Never switch modes unless a user specifies it.  if a broker is disconnected, show an error and try reconnection.  #4 fresh start.  #5 sperate page off the exisisting page.

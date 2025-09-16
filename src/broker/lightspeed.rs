@@ -119,12 +119,16 @@ pub enum BrokerEvent {
     Connected,
     Disconnected,
     OrderAck { client_order_id: String, order_id: String },
-    OrderFill { 
-        client_order_id: String, 
+    OrderFill {
+        client_order_id: String,
         symbol: String,
         side: String,
         qty: f64,
         price: f64,
+        cumulative_qty: f64,
+        remaining_qty: f64,
+        order_qty: f64,
+        is_partial_fill: bool,
     },
     OrderReject { client_order_id: String, reason: String },
     Error { message: String },
@@ -536,6 +540,16 @@ impl LightspeedBroker {
                     ) {
                         let qty: f64 = last_qty.parse().unwrap_or(0.0);
                         let price: f64 = last_px.parse().unwrap_or(0.0);
+                        let cum_qty: f64 = response.cum_qty.as_ref().and_then(|q| q.parse().ok()).unwrap_or(0.0);
+                        let leaves_qty: f64 = response.leaves_qty.as_ref().and_then(|q| q.parse().ok()).unwrap_or(0.0);
+                        let order_qty: f64 = response.order_qty.as_ref().and_then(|q| q.parse().ok()).unwrap_or(0.0);
+
+                        // Determine if this is a partial or complete fill
+                        let is_partial = leaves_qty > 0.0;
+                        let fill_status = if is_partial { "PARTIAL_FILL" } else { "FILL" };
+
+                        info!("Order {} {}: {} shares of {} at ${:.2} (Cumulative: {}/{} shares)",
+                              client_order_id, fill_status, qty, symbol, price, cum_qty, order_qty);
 
                         let _ = event_tx.send(BrokerEvent::OrderFill {
                             client_order_id: client_order_id.clone(),
@@ -543,6 +557,10 @@ impl LightspeedBroker {
                             side: side.clone(),
                             qty,
                             price,
+                            cumulative_qty: cum_qty,
+                            remaining_qty: leaves_qty,
+                            order_qty,
+                            is_partial_fill: is_partial,
                         });
 
                         // Update positions

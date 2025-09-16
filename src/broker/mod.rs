@@ -408,9 +408,9 @@ impl BrokerModule {
 
     /// Get live positions from database for a specific broker
     pub async fn get_live_positions(&self, broker_name: &str) -> Result<HashMap<String, Position>> {
-        let rows = sqlx::query_as::<_, (String, String, i64, f64, f64, f64, f64, i64, Option<i64>, String)>(
+        let rows = sqlx::query_as::<_, (String, String, i64, f64, f64, f64, f64, i64, i64, String)>(
             "SELECT id, symbol, quantity, avg_cost_basis, current_price, unrealized_pnl,
-                    realized_pnl, opened_at, closed_at, status
+                    realized_pnl, opened_at, last_updated, status
              FROM live_positions
              WHERE broker_name = ? AND status = 'OPEN' AND quantity != 0"
         )
@@ -422,7 +422,7 @@ impl BrokerModule {
 
         for row in rows {
             let (id, symbol, quantity, avg_cost_basis, current_price, _unrealized_pnl,
-                 realized_pnl, opened_at, closed_at, status) = row;
+                 realized_pnl, opened_at, last_updated, status) = row;
 
             let position = Position {
                 id,
@@ -433,7 +433,7 @@ impl BrokerModule {
                 current_price,
                 realized_pnl,
                 opened_at: chrono::DateTime::from_timestamp(opened_at, 0).unwrap_or_default(),
-                closed_at: closed_at.map(|ts| chrono::DateTime::from_timestamp(ts, 0).unwrap_or_default()),
+                closed_at: None, // Live positions don't have closed_at - they use last_updated
                 status: status.parse().unwrap_or(crate::types::PositionStatus::Open),
                 session_id: format!("{}_session", broker_name),
             };
